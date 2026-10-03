@@ -1,4 +1,4 @@
-local Spawner = loadstring(game:HttpGet("https://raw.githubusercontent.com/DripCapybara/Test/main/EndlessDoors/Entity%20Spawner/Source.lua"))()
+local Spawner = loadstring(game:HttpGet("https://raw.githubusercontent.com/ala22221/Backups-of-some-stuff/refs/heads/main/Fixed%20Spawner%20by%20DripCapybara.lua"))()
 
 
 -- Create entity
