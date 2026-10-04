@@ -1,116 +1,117 @@
--- Services
-
+```lua
+--// Services
 local Players = game:GetService("Players")
-local ReSt = game:GetService("ReplicatedStorage")
-local RS = game:GetService("RunService")
-local TS = game:GetService("TweenService")
-local CG = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
 
--- Variables
-
-local Plr = Players.LocalPlayer
-local Char = Plr.Character or Plr.CharacterAdded:Wait()
-local Hum = Char:WaitForChild("Humanoid")
-local Camera = workspace.CurrentCamera
+--// Player
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
 
 local StaticRushSpeed = 60
 
-local FindPartOnRayWithIgnoreList = workspace.FindPartOnRayWithIgnoreList
-
+--// Modules
 local SelfModules = {
     DefaultConfig = loadstring(game:HttpGet(
         "https://raw.githubusercontent.com/DripCapybara/Test/main/Doors/Backup/DefaultConfig.lua"
-    ))(),
+    ))()
 }
 
 local ModuleScripts = {
-    ModuleEvents = require(ReSt.ClientModules.Module_Events),
-    MainGame = require(Plr.PlayerGui.MainUI.Initiator.Main_Game),
+    ModuleEvents = require(ReplicatedStorage.ClientModules.Module_Events),
 }
 
 local EntityConnections = {}
-
 local Spawner = {}
 
--- =========================================
+--==================================================
 -- CHARACTER
--- =========================================
+--==================================================
 
 local function onCharacterAdded(char)
-    Char = char
-    Hum = char:WaitForChild("Humanoid")
-
-    task.defer(function()
-        Camera = workspace.CurrentCamera
-
-        if Camera and Hum then
-            pcall(function()
-                if not Camera.CameraSubject
-                    or not Camera.CameraSubject:IsDescendantOf(Char) then
-                    Camera.CameraSubject = Hum
-                end
-            end)
-        end
-    end)
+    Character = char
+    Humanoid = char:WaitForChild("Humanoid")
 end
 
 local function getPlayerRoot()
-    if not Char then
+    if not Character then
         return nil
     end
 
-    return Char:FindFirstChild("HumanoidRootPart")
-        or Char:FindFirstChild("Head")
+    return Character:FindFirstChild("HumanoidRootPart")
+        or Character:FindFirstChild("Head")
 end
 
--- =========================================
--- CAMERA SAFETY
--- =========================================
+--==================================================
+-- CAMERA FIX
+--==================================================
 -- Does NOT force CameraType.
--- Only repairs CameraSubject if it becomes invalid.
+-- Does NOT use Main_Game.camShaker.
+-- Only restores CameraSubject when it is actually invalid.
 
-local function repairCamera()
-    local currentCamera = workspace.CurrentCamera
+local function fixCamera()
+    local Camera = workspace.CurrentCamera
 
-    if not currentCamera or not Hum or not Hum.Parent then
+    if not Camera then
         return
     end
 
-    local subject = currentCamera.CameraSubject
+    if not Humanoid or not Humanoid.Parent then
+        return
+    end
 
-    if not subject
-        or not subject.Parent
-        or (
-            subject ~= Hum
-            and not subject:IsDescendantOf(Char)
-        ) then
+    local subject = Camera.CameraSubject
+
+    if subject == nil or not subject.Parent then
+        pcall(function()
+            Camera.CameraSubject = Humanoid
+        end)
+        return
+    end
+
+    -- If the camera somehow got assigned to something
+    -- completely unrelated to the player's character.
+    if subject ~= Humanoid
+        and not subject:IsDescendantOf(Character) then
 
         pcall(function()
-            currentCamera.CameraSubject = Hum
+            Camera.CameraSubject = Humanoid
         end)
     end
 end
 
 task.spawn(function()
-    while task.wait(0.25) do
-        repairCamera()
+    while task.wait(0.5) do
+        -- Don't interfere with normal cutscenes.
+        if not Character:GetAttribute("IsDead") then
+            fixCamera()
+        end
     end
 end)
 
--- =========================================
+--==================================================
 -- SOUND
--- =========================================
+--==================================================
 
 local function loadSound(soundData)
+    if not soundData then
+        return nil
+    end
+
     local sound = Instance.new("Sound")
 
     local soundId = tostring(soundData[1])
     local properties = soundData[2] or {}
 
-    for i, v in next, properties do
-        if i ~= "SoundId" and i ~= "Parent" then
+    for property, value in next, properties do
+        if property ~= "SoundId"
+            and property ~= "Parent" then
+
             pcall(function()
-                sound[i] = v
+                sound[property] = value
             end)
         end
     end
@@ -127,37 +128,33 @@ local function loadSound(soundData)
     return sound
 end
 
--- =========================================
--- ASSET LOADER
--- =========================================
+--==================================================
+-- IMAGE ASSET
+--==================================================
 
 local function LoadCustomAsset(asset)
     if asset == nil then
         return ""
     end
 
-    local assetString = tostring(asset)
+    local value = tostring(asset)
 
-    if assetString:match("^rbxassetid://")
-        or assetString:match("^rbxasset://")
-        or assetString:match("^http://")
-        or assetString:match("^https://") then
-
-        return assetString
+    if value:match("^rbxassetid://") then
+        return value
     end
 
-    if assetString:match("^%d+$") then
-        return "rbxassetid://" .. assetString
+    if value:match("^%d+$") then
+        return "rbxassetid://" .. value
     end
 
-    return assetString
+    return value
 end
 
--- =========================================
+--==================================================
 -- ENTITY MOVEMENT
--- =========================================
+--==================================================
 
-local function dragEntity(entityModel, pos, speed)
+local function dragEntity(entityModel, position, speed)
     if not entityModel
         or not entityModel.Parent
         or not entityModel.PrimaryPart then
@@ -165,20 +162,20 @@ local function dragEntity(entityModel, pos, speed)
     end
 
     local distance =
-        (entityModel.PrimaryPart.Position - pos).Magnitude
+        (entityModel.PrimaryPart.Position - position).Magnitude
 
-    local time =
+    local travelTime =
         distance / math.max(speed, 0.01)
 
-    local tween = TS:Create(
+    local tween = TweenService:Create(
         entityModel.PrimaryPart,
         TweenInfo.new(
-            time,
+            travelTime,
             Enum.EasingStyle.Linear,
             Enum.EasingDirection.Out
         ),
         {
-            Position = pos
+            Position = position
         }
     )
 
@@ -186,136 +183,225 @@ local function dragEntity(entityModel, pos, speed)
     tween.Completed:Wait()
 end
 
--- =========================================
+--==================================================
+-- MODEL LOADER
+--==================================================
+
+local function GetGitModel(modelUrl, modelName)
+
+    -- RBX asset ID
+    if modelUrl:match("^rbxassetid://") then
+
+        local success, objects = pcall(function()
+            return game:GetObjects(modelUrl)
+        end)
+
+        if not success then
+            warn("GetObjects failed:", objects)
+            return nil
+        end
+
+        return objects and objects[1]
+    end
+
+    local getAsset =
+        getcustomasset
+        or getsynasset
+
+    if not getAsset then
+        warn("getcustomasset/getsynasset is unavailable")
+        return nil
+    end
+
+    local fileName = modelName .. ".rbxm"
+
+    -- Download model
+    if not isfile(fileName) then
+
+        local success, data = pcall(function()
+            return game:HttpGet(modelUrl)
+        end)
+
+        if not success then
+            warn("Failed to download model:", data)
+            return nil
+        end
+
+        if not data or #data == 0 then
+            warn("Downloaded model is empty")
+            return nil
+        end
+
+        local writeSuccess, writeError = pcall(function()
+            writefile(fileName, data)
+        end)
+
+        if not writeSuccess then
+            warn("Failed to save model:", writeError)
+            return nil
+        end
+    end
+
+    -- Convert local file into Roblox asset
+    local customAsset
+
+    local assetSuccess, assetError = pcall(function()
+        customAsset = getAsset(fileName)
+    end)
+
+    if not assetSuccess then
+        warn("getcustomasset failed:", assetError)
+        return nil
+    end
+
+    if not customAsset then
+        warn("getcustomasset returned nil")
+        return nil
+    end
+
+    -- Load RBXM
+    local objectSuccess, objects = pcall(function()
+        return game:GetObjects(customAsset)
+    end)
+
+    if not objectSuccess then
+        warn("Failed to load RBXM:", objects)
+        return nil
+    end
+
+    if not objects or not objects[1] then
+        warn("RBXM contained no object")
+        return nil
+    end
+
+    local object = objects[1]
+    object.Name = modelName
+
+    return object
+end
+
+--==================================================
 -- CREATE ENTITY
--- =========================================
+--==================================================
 
 Spawner.createEntity = function(config)
+
     config = config or {}
 
-    for i, v in next, SelfModules.DefaultConfig do
+    -- Fill missing config options
+    for i, value in next, SelfModules.DefaultConfig do
         if config[i] == nil then
-            config[i] = v
+            config[i] = value
         end
     end
 
     config.Speed =
         StaticRushSpeed / 100 * config.Speed
 
-    -- =====================================
-    -- MODEL LOADER
-    -- =====================================
-
-    local function GetGitModel(ModelUrl, ModelName)
-        if ModelUrl:match("rbxassetid://") then
-            return game:GetObjects(ModelUrl)[1]
-        end
-
-        if not isfile(ModelName .. ".txt") then
-            writefile(
-                ModelName .. ".txt",
-                game:HttpGet(ModelUrl)
-            )
-        end
-
-        local getAsset =
-            getcustomasset
-            or getsynasset
-
-        if not getAsset then
-            error(
-                "Your executor does not support getcustomasset or getsynasset"
-            )
-        end
-
-        local assetObject = game:GetObjects(
-            getAsset(ModelName .. ".txt")
-        )[1]
-
-        if assetObject then
-            assetObject.Name = ModelName
-        end
-
-        return assetObject
-    end
-
-    -- FIXED MISSING ")"
+    -- Load model
     local entityModel = GetGitModel(
         config.Model,
         "CustomModel_" .. tostring(math.random(1, 100000000))
     )
 
-    if typeof(entityModel) == "Instance"
-        and entityModel.ClassName == "Model" then
-
-        entityModel.PrimaryPart =
-            entityModel.PrimaryPart
-            or entityModel:FindFirstChildWhichIsA("BasePart")
-
-        if entityModel.PrimaryPart then
-            entityModel.PrimaryPart.Anchored = true
-
-            if config.CustomName then
-                entityModel.Name = config.CustomName
-            end
-
-            entityModel:SetAttribute(
-                "IsCustomEntity",
-                true
-            )
-
-            entityModel:SetAttribute(
-                "NoAI",
-                false
-            )
-
-            local entityTable = {
-                Model = entityModel,
-                Config = config,
-
-                Debug = {
-                    OnEntitySpawned = function() end,
-                    OnEntityDespawned = function() end,
-                    OnEntityStartMoving = function() end,
-                    OnEntityFinishedRebound = function() end,
-                    OnEntityEnteredRoom = function() end,
-                    OnLookAtEntity = function() end,
-                    OnDeath = function() end
-                }
-            }
-
-            return entityTable
-        end
+    if not entityModel then
+        warn("FAILED TO CREATE ENTITY MODEL")
+        warn("Model:", config.Model)
+        return nil
     end
 
-    warn(
-        "Failed to create entity model:",
-        config.Model
+    if entityModel.ClassName ~= "Model" then
+        warn(
+            "Entity is not a Model:",
+            entityModel.ClassName
+        )
+
+        pcall(function()
+            entityModel:Destroy()
+        end)
+
+        return nil
+    end
+
+    entityModel.PrimaryPart =
+        entityModel.PrimaryPart
+        or entityModel:FindFirstChildWhichIsA("BasePart")
+
+    if not entityModel.PrimaryPart then
+        warn("Entity has no PrimaryPart/BasePart")
+
+        pcall(function()
+            entityModel:Destroy()
+        end)
+
+        return nil
+    end
+
+    entityModel.PrimaryPart.Anchored = true
+
+    if config.CustomName then
+        entityModel.Name = config.CustomName
+    end
+
+    entityModel:SetAttribute(
+        "IsCustomEntity",
+        true
     )
 
-    return nil
+    entityModel:SetAttribute(
+        "NoAI",
+        false
+    )
+
+    -- ALWAYS create Debug table
+    local entityTable = {
+        Model = entityModel,
+
+        Config = config,
+
+        Debug = {
+            OnEntitySpawned = function() end,
+            OnEntityDespawned = function() end,
+            OnEntityStartMoving = function() end,
+            OnEntityFinishedRebound = function() end,
+            OnEntityEnteredRoom = function() end,
+            OnLookAtEntity = function() end,
+            OnDeath = function() end
+        }
+    }
+
+    return entityTable
 end
 
--- =========================================
+--==================================================
 -- RUN ENTITY
--- =========================================
+--==================================================
 
 Spawner.runEntity = function(entityTable)
-    if not entityTable
-        or not entityTable.Model
-        or not entityTable.Config then
 
-        warn("Invalid entityTable")
+    if not entityTable then
+        warn("runEntity: entityTable is nil")
+        return
+    end
+
+    if not entityTable.Model then
+        warn("runEntity: entityTable.Model is nil")
+        return
+    end
+
+    if not entityTable.Debug then
+        warn("runEntity: entityTable.Debug is nil")
         return
     end
 
     local nodes = {}
 
-    -- =====================================
+    --==================================================
     -- FIND NODES
-    -- =====================================
+    --==================================================
 
     for _, room in next, workspace.CurrentRooms:GetChildren() do
+
         local pathfindNodes =
             room:FindFirstChild("PathfindNodes")
 
@@ -359,9 +445,9 @@ Spawner.runEntity = function(entityTable)
         return
     end
 
-    -- =====================================
+    --==================================================
     -- SPAWN
-    -- =====================================
+    --==================================================
 
     local entityModel =
         entityTable.Model:Clone()
@@ -390,8 +476,7 @@ Spawner.runEntity = function(entityTable)
         )
         + Vector3.new(
             0,
-            3.5
-                + entityTable.Config.HeightOffset,
+            3.5 + entityTable.Config.HeightOffset,
             0
         )
     )
@@ -402,70 +487,49 @@ Spawner.runEntity = function(entityTable)
         entityTable.Debug.OnEntitySpawned
     )
 
-    -- =====================================
-    -- MUTE ON DEATH SCREEN
-    -- =====================================
-
-    if CG:FindFirstChild("JumpscareGui")
-        or (
-            Plr.PlayerGui.MainUI.Death.HelpfulDialogue.Visible
-            and not Plr.PlayerGui.MainUI.DeathPanelDead.Visible
-        ) then
-
-        for _, v in next,
-            entityModel:GetDescendants() do
-
-            if v.ClassName == "Sound"
-                and v.Playing then
-
-                v:Stop()
-            end
-        end
-    end
-
-    -- =====================================
+    --==================================================
     -- FLICKER
-    -- =====================================
+    --==================================================
 
     if entityTable.Config.FlickerLights[1] then
+
         local latestRoom =
             workspace.CurrentRooms[
-                ReSt.GameData.LatestRoom.Value
+                ReplicatedStorage.GameData.LatestRoom.Value
             ]
 
         if latestRoom then
-            ModuleScripts.ModuleEvents.flicker(
-                latestRoom,
-                entityTable.Config.FlickerLights[2]
-            )
+            pcall(function()
+                ModuleScripts.ModuleEvents.flicker(
+                    latestRoom,
+                    entityTable.Config.FlickerLights[2]
+                )
+            end)
         end
     end
 
-    -- =====================================
+    --==================================================
     -- DELAY
-    -- =====================================
+    --==================================================
 
     task.wait(
         entityTable.Config.DelayTime
     )
 
-    -- =====================================
-    -- MOVEMENT CONNECTION
-    -- =====================================
+    --==================================================
+    -- MOVEMENT
+    --==================================================
 
     local enteredRooms = {}
 
     entityConnections.movementTick =
-        RS.Stepped:Connect(function()
+        RunService.Stepped:Connect(function()
 
             if not entityModel.Parent
-                or entityModel:GetAttribute("NoAI")
-                or not entityModel.PrimaryPart then
+                or not entityModel.PrimaryPart
+                or entityModel:GetAttribute("NoAI") then
                 return
             end
-
-            local entityPos =
-                entityModel.PrimaryPart.Position
 
             local playerRoot =
                 getPlayerRoot()
@@ -474,39 +538,37 @@ Spawner.runEntity = function(entityTable)
                 return
             end
 
+            local entityPos =
+                entityModel.PrimaryPart.Position
+
             local rootPos =
                 playerRoot.Position
 
             local floorRay =
-                FindPartOnRayWithIgnoreList(
-                    workspace,
+                workspace:FindPartOnRayWithIgnoreList(
                     Ray.new(
                         entityPos,
                         Vector3.new(0, -10, 0)
                     ),
                     {
                         entityModel,
-                        Char
+                        Character
                     }
                 )
 
             local playerInSight =
-                FindPartOnRayWithIgnoreList(
-                    workspace,
+                workspace:FindPartOnRayWithIgnoreList(
                     Ray.new(
                         entityPos,
                         rootPos - entityPos
                     ),
                     {
                         entityModel,
-                        Char
+                        Character
                     }
                 ) == nil
 
-            -- =================================
-            -- ROOM DETECTION
-            -- =================================
-
+            -- Room detection
             if floorRay
                 and floorRay.Name == "Floor" then
 
@@ -528,9 +590,9 @@ Spawner.runEntity = function(entityTable)
                         )
 
                         if entityTable.Config.BreakLights then
-                            ModuleScripts.ModuleEvents.shatter(
-                                room
-                            )
+                            pcall(function()
+                                ModuleScripts.ModuleEvents.shatter(room)
+                            end)
                         end
 
                         break
@@ -538,56 +600,30 @@ Spawner.runEntity = function(entityTable)
                 end
             end
 
-            -- =================================
+            --==================================================
             -- CAMERA SHAKE
-            -- =================================
+            --==================================================
+            -- INTENTIONALLY DISABLED.
+            --
+            -- The old code called:
+            -- MainGame.camShaker:ShakeOnce(...)
+            --
+            -- That is the part most likely to conflict
+            -- with the current DOORS camera controller.
 
-            local shakeConfig =
-                entityTable.Config.CamShake
-
-            local shakeDistance =
-                (
-                    playerRoot.Position
-                    - entityModel.PrimaryPart.Position
-                ).Magnitude
-
-            if shakeConfig[1]
-                and shakeDistance <= shakeConfig[3] then
-
-                local shakeRep = {}
-
-                for i, v in next,
-                    shakeConfig[2] do
-                    shakeRep[i] = v
-                end
-
-                shakeRep[1] =
-                    shakeConfig[2][1]
-                    / shakeConfig[3]
-                    * (
-                        shakeConfig[3]
-                        - shakeDistance
-                    )
-
-                pcall(function()
-                    ModuleScripts.MainGame.camShaker:ShakeOnce(
-                        table.unpack(shakeRep)
-                    )
-                end)
-            end
-
-            -- =================================
+            --==================================================
             -- PLAYER DETECTION
-            -- =================================
+            --==================================================
 
             if playerInSight then
 
-                local currentCamera =
+                local Camera =
                     workspace.CurrentCamera
 
-                if currentCamera then
+                if Camera then
+
                     local _, onScreen =
-                        currentCamera:WorldToViewportPoint(
+                        Camera:WorldToViewportPoint(
                             entityModel.PrimaryPart.Position
                         )
 
@@ -598,13 +634,13 @@ Spawner.runEntity = function(entityTable)
                     end
                 end
 
-                -- =================================
+                --==================================================
                 -- KILL
-                -- =================================
+                --==================================================
 
                 if entityTable.Config.CanKill
-                    and not Char:GetAttribute("IsDead")
-                    and not Char:GetAttribute("Hiding")
+                    and not Character:GetAttribute("IsDead")
+                    and not Character:GetAttribute("Hiding")
                     and (
                         playerRoot.Position
                         - entityModel.PrimaryPart.Position
@@ -613,8 +649,6 @@ Spawner.runEntity = function(entityTable)
 
                     task.spawn(function()
 
-                        -- Prevent cutscene deaths
-
                         if workspace.Ambience_FigureEnd.Playing
                             or workspace.Ambience_FigureStart.Playing
                             or workspace.Ambience_Figure.Playing
@@ -622,50 +656,40 @@ Spawner.runEntity = function(entityTable)
                             or workspace:FindFirstChild("Blink")
                             or workspace:FindFirstChild("SeekMoving")
                             or workspace:FindFirstChild("Atumalaca") then
-
                             return
                         end
 
-                        Char:SetAttribute(
+                        Character:SetAttribute(
                             "IsDead",
                             true
                         )
 
                         -- Mute entity
-
                         for _, v in next,
                             entityModel:GetDescendants() do
 
                             if v.ClassName == "Sound"
                                 and v.Playing then
-
                                 v:Stop()
                             end
                         end
 
-                        -- =================================
-                        -- JUMPSCARE
-                        -- =================================
-
+                        -- Jumpscare
                         if entityTable.Config.Jumpscare[1] then
                             Spawner.runJumpscare(
                                 entityTable.Config.Jumpscare[2]
                             )
                         end
 
-                        -- =================================
-                        -- DEATH
-                        -- =================================
-
                         task.spawn(
                             entityTable.Debug.OnDeath
                         )
 
-                        Hum.Health = 0
+                        Humanoid.Health = 0
 
                         local playerStats =
-                            ReSt.GameStats:FindFirstChild(
-                                "Player_" .. Plr.Name
+                            ReplicatedStorage.GameStats:FindFirstChild(
+                                "Player_" .. Player.Name
                             )
 
                         if playerStats
@@ -677,11 +701,13 @@ Spawner.runEntity = function(entityTable)
                         end
 
                         if #entityTable.Config.CustomDialog > 0 then
-                            firesignal(
-                                ReSt.EntityInfo.DeathHint.OnClientEvent,
-                                entityTable.Config.CustomDialog,
-                                "Blue"
-                            )
+                            pcall(function()
+                                firesignal(
+                                    ReplicatedStorage.EntityInfo.DeathHint.OnClientEvent,
+                                    entityTable.Config.CustomDialog,
+                                    "Blue"
+                                )
+                            end)
                         end
                     end)
                 end
@@ -692,19 +718,20 @@ Spawner.runEntity = function(entityTable)
         entityTable.Debug.OnEntityStartMoving
     )
 
-    -- =========================================
+    --==================================================
     -- CYCLES
-    -- =========================================
+    --==================================================
 
     local cyclesConfig =
         entityTable.Config.Cycles
 
     if entityTable.Config.BackwardsMovement then
+
         local inverseNodes = {}
 
-        for nodeIdx = #nodes, 1, -1 do
+        for i = #nodes, 1, -1 do
             inverseNodes[#inverseNodes + 1] =
-                nodes[nodeIdx]
+                nodes[i]
         end
 
         nodes = inverseNodes
@@ -721,9 +748,12 @@ Spawner.runEntity = function(entityTable)
 
     for cycle = 1, cycleAmount do
 
+        -- Forward
         for nodeIdx = 1, #nodes do
+
             dragEntity(
                 entityModel,
+
                 nodes[nodeIdx].Position
                     + Vector3.new(
                         0,
@@ -731,15 +761,19 @@ Spawner.runEntity = function(entityTable)
                             + entityTable.Config.HeightOffset,
                         0
                     ),
+
                 entityTable.Config.Speed
             )
         end
 
+        -- Reverse
         if cyclesConfig.Max > 1 then
 
             for nodeIdx = #nodes, 1, -1 do
+
                 dragEntity(
                     entityModel,
+
                     nodes[nodeIdx].Position
                         + Vector3.new(
                             0,
@@ -747,6 +781,7 @@ Spawner.runEntity = function(entityTable)
                                 + entityTable.Config.HeightOffset,
                             0
                         ),
+
                     entityTable.Config.Speed
                 )
             end
@@ -763,47 +798,47 @@ Spawner.runEntity = function(entityTable)
         end
     end
 
-    -- =========================================
-    -- DESTROY
-    -- =========================================
+    --==================================================
+    -- DESPAWN
+    --==================================================
 
-    if entityModel
-        and not entityModel:GetAttribute("NoAI") then
+    for _, connection in next,
+        entityConnections do
 
-        for _, connection in next,
-            entityConnections do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
 
-            if connection then
-                pcall(function()
-                    connection:Disconnect()
-                end)
-            end
-        end
+    task.spawn(
+        entityTable.Debug.OnEntityDespawned
+    )
 
-        task.spawn(
-            entityTable.Debug.OnEntityDespawned
-        )
+    if entityModel.PrimaryPart then
+        entityModel.PrimaryPart.Anchored = false
+        entityModel.PrimaryPart.CanCollide = false
+    end
 
-        if entityModel.PrimaryPart then
-            entityModel.PrimaryPart.Anchored = false
-            entityModel.PrimaryPart.CanCollide = false
-        end
+    task.wait(6)
 
-        task.wait(6)
+    if entityModel then
+        entityModel:Destroy()
+    end
 
-        if entityModel then
-            entityModel:Destroy()
-        end
+    EntityConnections[entityModel] = nil
 
-        EntityConnections[entityModel] = nil
+    -- Repair camera AFTER entity is gone
+    if not Character:GetAttribute("IsDead") then
+        fixCamera()
     end
 end
 
--- =========================================
+--==================================================
 -- JUMPSCARE
--- =========================================
+--==================================================
 
 Spawner.runJumpscare = function(config)
+
     config = config or {}
 
     local image1 =
@@ -812,21 +847,15 @@ Spawner.runJumpscare = function(config)
     local image2 =
         LoadCustomAsset(config.Image2)
 
-    local sound1 = nil
-    local sound2 = nil
+    local sound1 =
+        config.Sound1
+        and loadSound(config.Sound1)
 
-    if config.Sound1 then
-        sound1 =
-            loadSound(config.Sound1)
-    end
-
-    if config.Sound2 then
-        sound2 =
-            loadSound(config.Sound2)
-    end
+    local sound2 =
+        config.Sound2
+        and loadSound(config.Sound2)
 
     -- UI
-
     local JumpscareGui =
         Instance.new("ScreenGui")
 
@@ -849,10 +878,9 @@ Spawner.runJumpscare = function(config)
         "Background"
 
     Background.BackgroundColor3 =
-        Color3.fromRGB(0, 0, 0)
+        Color3.new(0, 0, 0)
 
-    Background.BorderSizePixel =
-        0
+    Background.BorderSizePixel = 0
 
     Background.Size =
         UDim2.new(1, 0, 1, 0)
@@ -869,9 +897,6 @@ Spawner.runJumpscare = function(config)
     Face.Position =
         UDim2.new(0.5, 0, 0.5, 0)
 
-    Face.ResampleMode =
-        Enum.ResamplerMode.Pixelated
-
     Face.Size =
         UDim2.new(0, 150, 0, 150)
 
@@ -881,66 +906,62 @@ Spawner.runJumpscare = function(config)
 
     Face.Parent = Background
     Background.Parent = JumpscareGui
-    JumpscareGui.Parent = CG
+    JumpscareGui.Parent = CoreGui
 
-    -- =========================================
+    --==================================================
     -- TEASE
-    -- =========================================
+    --==================================================
 
-    local teaseConfig =
-        config.Tease or {
+    local tease =
+        config.Tease
+        or {
             false,
             Min = 1,
             Max = 1
         }
 
-    local absHeight =
+    local height =
         JumpscareGui.AbsoluteSize.Y
 
-    if absHeight <= 0 then
-        absHeight =
+    if height <= 0 then
+        height =
             workspace.CurrentCamera.ViewportSize.Y
     end
 
-    local minTeaseSize =
-        absHeight / 5
+    local minSize =
+        height / 5
 
-    local maxTeaseSize =
-        absHeight / 2.5
+    local maxSize =
+        height / 2.5
 
-    if teaseConfig[1] then
+    if tease[1] then
 
-        local teaseAmount =
+        local amount =
             math.random(
-                teaseConfig.Min,
-                teaseConfig.Max
+                tease.Min,
+                tease.Max
             )
 
         if sound1 then
             sound1:Play()
         end
 
-        for _ = 1, teaseAmount do
+        for _ = 1, amount do
 
             task.wait(
                 math.random(100, 200) / 100
             )
 
-            local growFactor =
-                (
-                    maxTeaseSize
-                    - minTeaseSize
-                )
-                / teaseAmount
+            local grow =
+                (maxSize - minSize)
+                / amount
 
             Face.Size =
                 UDim2.new(
                     0,
-                    Face.AbsoluteSize.X
-                        + growFactor,
+                    Face.AbsoluteSize.X + grow,
                     0,
-                    Face.AbsoluteSize.Y
-                        + growFactor
+                    Face.AbsoluteSize.Y + grow
                 )
         end
 
@@ -949,23 +970,22 @@ Spawner.runJumpscare = function(config)
         )
     end
 
-    -- =========================================
+    --==================================================
     -- FLASHING
-    -- =========================================
+    --==================================================
 
-    local flashingConfig =
-        config.Flashing or {
-            false
-        }
+    local flashing =
+        config.Flashing
+        or {false}
 
-    if flashingConfig[1] then
+    if flashing[1] then
 
         task.spawn(function()
 
             while JumpscareGui.Parent do
 
                 Background.BackgroundColor3 =
-                    flashingConfig[2]
+                    flashing[2]
                     or Color3.new(1, 1, 1)
 
                 task.wait(
@@ -986,21 +1006,21 @@ Spawner.runJumpscare = function(config)
         end)
     end
 
-    -- =========================================
+    --==================================================
     -- SHAKE
-    -- =========================================
+    --==================================================
 
     if config.Shake then
 
         task.spawn(function()
 
-            local origin =
+            local originalPosition =
                 Face.Position
 
             while JumpscareGui.Parent do
 
                 Face.Position =
-                    origin
+                    originalPosition
                     + UDim2.new(
                         0,
                         math.random(-10, 10),
@@ -1016,35 +1036,34 @@ Spawner.runJumpscare = function(config)
         end)
     end
 
-    -- =========================================
+    --==================================================
     -- FINAL JUMPSCARE
-    -- =========================================
+    --==================================================
 
-    Face.Image =
-        image2
+    Face.Image = image2
 
     Face.Size =
         UDim2.new(
             0,
-            maxTeaseSize,
+            maxSize,
             0,
-            maxTeaseSize
+            maxSize
         )
 
     if sound2 then
         sound2:Play()
     end
 
-    TS:Create(
+    TweenService:Create(
         Face,
         TweenInfo.new(0.75),
         {
             Size =
                 UDim2.new(
                     0,
-                    absHeight * 3,
+                    height * 3,
                     0,
-                    absHeight * 3
+                    height * 3
                 ),
 
             ImageTransparency = 0.5
@@ -1065,40 +1084,44 @@ Spawner.runJumpscare = function(config)
         sound2:Destroy()
     end
 
-    -- Make sure camera hasn't lost the character
-    repairCamera()
+    -- Only repair if the player isn't dead
+    if not Character:GetAttribute("IsDead") then
+        fixCamera()
+    end
 end
 
--- =========================================
--- CONNECTIONS
--- =========================================
+--==================================================
+-- CHARACTER CONNECTION
+--==================================================
 
-Plr.CharacterAdded:Connect(
+Player.CharacterAdded:Connect(
     onCharacterAdded
 )
 
-
+--==================================================
+-- PATHFIND NODE PROTECTION
+--==================================================
 
 if not SpawnerSetup then
 
     getgenv().SpawnerSetup = true
 
     workspace.DescendantRemoving:Connect(
-        function(des)
+        function(descendant)
 
-            if des.Name == "PathfindNodes" then
+            if descendant.Name == "PathfindNodes" then
 
                 pcall(function()
-                    des:Clone().Parent =
-                        des.Parent
+                    descendant:Clone().Parent =
+                        descendant.Parent
                 end)
             end
         end
     )
 end
 
--- =========================================
+--==================================================
 -- RETURN
--- =========================================
+--==================================================
 
 return Spawner
