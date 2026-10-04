@@ -38,37 +38,6 @@ local function getPlayerRoot()
         or Char:FindFirstChild("Head")
 end
 
-local function fixCamera()
-    local Camera = workspace.CurrentCamera
-
-    if not Camera then
-        return
-    end
-
-    if not Hum or not Hum.Parent then
-        return
-    end
-
-    if Char:GetAttribute("IsDead") then
-        return
-    end
-
-    local subject = Camera.CameraSubject
-
-    if not subject or not subject.Parent then
-        pcall(function()
-            Camera.CameraSubject = Hum
-        end)
-        return
-    end
-
-    if subject ~= Hum and not subject:IsDescendantOf(Char) then
-        pcall(function()
-            Camera.CameraSubject = Hum
-        end)
-    end
-end
-
 local function soundPlaying(name)
     local sound = workspace:FindFirstChild(name)
 
@@ -76,12 +45,6 @@ local function soundPlaying(name)
         and sound:IsA("Sound")
         and sound.Playing
 end
-
-task.spawn(function()
-    while task.wait(0.5) do
-        fixCamera()
-    end
-end)
 
 local function loadSound(soundData)
     if not soundData then
@@ -93,7 +56,9 @@ local function loadSound(soundData)
     local properties = soundData[2] or {}
 
     for property, value in next, properties do
-        if property ~= "SoundId" and property ~= "Parent" then
+        if property ~= "SoundId"
+            and property ~= "Parent" then
+
             pcall(function()
                 sound[property] = value
             end)
@@ -119,7 +84,9 @@ local function LoadCustomAsset(asset)
 
     local value = tostring(asset)
 
-    if value:match("^rbxassetid://") then
+    if value:match("^rbxassetid://")
+        or value:match("^rbxasset://") then
+
         return value
     end
 
@@ -134,6 +101,7 @@ local function dragEntity(entityModel, position, speed)
     if not entityModel
         or not entityModel.Parent
         or not entityModel.PrimaryPart then
+
         return
     end
 
@@ -287,7 +255,8 @@ Spawner.createEntity = function(config)
         end
     end
 
-    config.Speed = StaticRushSpeed / 100 * config.Speed
+    config.Speed =
+        StaticRushSpeed / 100 * config.Speed
 
     local entityModel = GetGitModel(
         config.Model,
@@ -333,11 +302,19 @@ Spawner.createEntity = function(config)
         entityModel.Name = config.CustomName
     end
 
-    entityModel:SetAttribute("IsCustomEntity", true)
-    entityModel:SetAttribute("NoAI", false)
+    entityModel:SetAttribute(
+        "IsCustomEntity",
+        true
+    )
+
+    entityModel:SetAttribute(
+        "NoAI",
+        false
+    )
 
     return {
         Model = entityModel,
+
         Config = config,
 
         Debug = {
@@ -372,14 +349,21 @@ Spawner.runEntity = function(entityTable)
 
     local nodes = {}
 
-    for _, room in next, workspace.CurrentRooms:GetChildren() do
-        local pathfindNodes = room:FindFirstChild("PathfindNodes")
+    for _, room in next,
+        workspace.CurrentRooms:GetChildren() do
+
+        local pathfindNodes =
+            room:FindFirstChild("PathfindNodes")
 
         if pathfindNodes then
-            pathfindNodes = pathfindNodes:GetChildren()
+            pathfindNodes =
+                pathfindNodes:GetChildren()
         else
-            local fakeNode = Instance.new("Part")
+            local fakeNode =
+                Instance.new("Part")
+
             fakeNode.Name = "1"
+
             fakeNode.CFrame =
                 room:WaitForChild("RoomExit").CFrame
                 - Vector3.new(
@@ -388,12 +372,18 @@ Spawner.runEntity = function(entityTable)
                     0
                 )
 
-            pathfindNodes = {fakeNode}
+            pathfindNodes = {
+                fakeNode
+            }
         end
 
-        table.sort(pathfindNodes, function(a, b)
-            return tonumber(a.Name) < tonumber(b.Name)
-        end)
+        table.sort(
+            pathfindNodes,
+            function(a, b)
+                return tonumber(a.Name)
+                    < tonumber(b.Name)
+            end
+        )
 
         for _, node in next, pathfindNodes do
             nodes[#nodes + 1] = node
@@ -405,7 +395,8 @@ Spawner.runEntity = function(entityTable)
         return
     end
 
-    local entityModel = entityTable.Model:Clone()
+    local entityModel =
+        entityTable.Model:Clone()
 
     local startNodeIndex =
         entityTable.Config.BackwardsMovement
@@ -419,35 +410,71 @@ Spawner.runEntity = function(entityTable)
 
     EntityConnections[entityModel] = {}
 
-    local entityConnections = EntityConnections[entityModel]
+    local entityConnections =
+        EntityConnections[entityModel]
 
     entityModel:PivotTo(
         nodes[startNodeIndex].CFrame
-        * CFrame.new(0, 0, startNodeOffset)
+        * CFrame.new(
+            0,
+            0,
+            startNodeOffset
+        )
         + Vector3.new(
             0,
-            3.5 + entityTable.Config.HeightOffset,
+            3.5
+                + entityTable.Config.HeightOffset,
             0
         )
     )
 
     entityModel.Parent = workspace
 
-    task.spawn(entityTable.Debug.OnEntitySpawned)
+    task.spawn(
+        entityTable.Debug.OnEntitySpawned
+    )
 
-    task.wait(entityTable.Config.DelayTime)
+    -- Mute entity on spawn
+
+    if CG:FindFirstChild("JumpscareGui")
+        or (
+            Plr.PlayerGui.MainUI.Death.HelpfulDialogue.Visible
+            and not Plr.PlayerGui.MainUI.DeathPanelDead.Visible
+        ) then
+
+        for _, v in next,
+            entityModel:GetDescendants() do
+
+            if v.ClassName == "Sound"
+                and v.Playing then
+
+                v:Stop()
+            end
+        end
+    end
+
+    -- Delay
+
+    task.wait(
+        entityTable.Config.DelayTime
+    )
+
+    -- Movement
 
     local enteredRooms = {}
 
     entityConnections.movementTick =
         RS.Stepped:Connect(function()
+
             if not entityModel.Parent
                 or not entityModel.PrimaryPart
                 or entityModel:GetAttribute("NoAI") then
+
                 return
             end
 
-            local playerRoot = getPlayerRoot()
+            local playerRoot =
+                getPlayerRoot()
 
             if not playerRoot then
                 return
@@ -483,7 +510,11 @@ Spawner.runEntity = function(entityTable)
                     }
                 ) == nil
 
-            if floorRay and floorRay.Name == "Floor" then
+            -- Entered room
+
+            if floorRay
+                and floorRay.Name == "Floor" then
+
                 for _, room in next,
                     workspace.CurrentRooms:GetChildren() do
 
@@ -493,7 +524,8 @@ Spawner.runEntity = function(entityTable)
                             room
                         ) then
 
-                        enteredRooms[#enteredRooms + 1] = room
+                        enteredRooms[#enteredRooms + 1] =
+                            room
 
                         task.spawn(
                             entityTable.Debug.OnEntityEnteredRoom,
@@ -505,12 +537,18 @@ Spawner.runEntity = function(entityTable)
                 end
             end
 
-            -- Camera shake intentionally disabled
+            -- Camera shake disabled
+            -- This source never modifies CurrentCamera.
+
+            -- Player in sight
 
             if playerInSight then
-                local Camera = workspace.CurrentCamera
+
+                local Camera =
+                    workspace.CurrentCamera
 
                 if Camera then
+
                     local _, onScreen =
                         Camera:WorldToViewportPoint(
                             entityModel.PrimaryPart.Position
@@ -523,6 +561,8 @@ Spawner.runEntity = function(entityTable)
                     end
                 end
 
+                -- Kill player
+
                 if entityTable.Config.CanKill
                     and not Char:GetAttribute("IsDead")
                     and not Char:GetAttribute("Hiding")
@@ -533,13 +573,25 @@ Spawner.runEntity = function(entityTable)
                     <= entityTable.Config.KillRange then
 
                     task.spawn(function()
-                        if soundPlaying("Ambience_FigureEnd")
-                            or soundPlaying("Ambience_FigureStart")
-                            or soundPlaying("Ambience_Figure")
-                            or soundPlaying("Ambience_Seek")
-                            or workspace:FindFirstChild("Blink")
-                            or workspace:FindFirstChild("SeekMoving")
-                            or workspace:FindFirstChild("Atumalaca") then
+
+                        -- Safe cutscene checks
+
+                        if soundPlaying(
+                            "Ambience_FigureEnd"
+                        )
+                        or soundPlaying(
+                            "Ambience_FigureStart"
+                        )
+                        or soundPlaying(
+                            "Ambience_Figure"
+                        )
+                        or soundPlaying(
+                            "Ambience_Seek"
+                        )
+                        or workspace:FindFirstChild("Blink")
+                        or workspace:FindFirstChild("SeekMoving")
+                        or workspace:FindFirstChild("Atumalaca") then
+
                             return
                         end
 
@@ -547,16 +599,24 @@ Spawner.runEntity = function(entityTable)
                             return
                         end
 
-                        Char:SetAttribute("IsDead", true)
+                        Char:SetAttribute(
+                            "IsDead",
+                            true
+                        )
+
+                        -- Mute entity
 
                         for _, v in next,
                             entityModel:GetDescendants() do
 
                             if v.ClassName == "Sound"
                                 and v.Playing then
+
                                 v:Stop()
                             end
                         end
+
+                        -- Jumpscare
 
                         if entityTable.Config.Jumpscare
                             and entityTable.Config.Jumpscare[1] then
@@ -566,7 +626,11 @@ Spawner.runEntity = function(entityTable)
                             )
                         end
 
-                        task.spawn(entityTable.Debug.OnDeath)
+                        -- Death
+
+                        task.spawn(
+                            entityTable.Debug.OnDeath
+                        )
 
                         Hum.Health = 0
 
@@ -587,11 +651,25 @@ Spawner.runEntity = function(entityTable)
                             and #entityTable.Config.CustomDialog > 0 then
 
                             pcall(function()
-                                firesignal(
-                                    ReSt.EntityInfo.DeathHint.OnClientEvent,
-                                    entityTable.Config.CustomDialog,
-                                    "Blue"
-                                )
+
+                                local entityInfo =
+                                    ReSt:FindFirstChild(
+                                        "EntityInfo"
+                                    )
+
+                                local deathHint =
+                                    entityInfo
+                                    and entityInfo:FindFirstChild(
+                                        "DeathHint"
+                                    )
+
+                                if deathHint then
+                                    firesignal(
+                                        deathHint.OnClientEvent,
+                                        entityTable.Config.CustomDialog,
+                                        "Blue"
+                                    )
+                                end
                             end)
                         end
                     end)
@@ -599,15 +677,22 @@ Spawner.runEntity = function(entityTable)
             end
         end)
 
-    task.spawn(entityTable.Debug.OnEntityStartMoving)
+    task.spawn(
+        entityTable.Debug.OnEntityStartMoving
+    )
 
-    local cyclesConfig = entityTable.Config.Cycles
+    -- Cycles
+
+    local cyclesConfig =
+        entityTable.Config.Cycles
 
     if entityTable.Config.BackwardsMovement then
+
         local inverseNodes = {}
 
         for nodeIdx = #nodes, 1, -1 do
-            inverseNodes[#inverseNodes + 1] = nodes[nodeIdx]
+            inverseNodes[#inverseNodes + 1] =
+                nodes[nodeIdx]
         end
 
         nodes = inverseNodes
@@ -623,13 +708,16 @@ Spawner.runEntity = function(entityTable)
         )
 
     for cycle = 1, cycleAmount do
+
         for nodeIdx = 1, #nodes do
+
             dragEntity(
                 entityModel,
                 nodes[nodeIdx].Position
                     + Vector3.new(
                         0,
-                        3.5 + entityTable.Config.HeightOffset,
+                        3.5
+                            + entityTable.Config.HeightOffset,
                         0
                     ),
                 entityTable.Config.Speed
@@ -637,13 +725,16 @@ Spawner.runEntity = function(entityTable)
         end
 
         if cyclesConfig.Max > 1 then
+
             for nodeIdx = #nodes, 1, -1 do
+
                 dragEntity(
                     entityModel,
                     nodes[nodeIdx].Position
                         + Vector3.new(
                             0,
-                            3.5 + entityTable.Config.HeightOffset,
+                            3.5
+                                + entityTable.Config.HeightOffset,
                             0
                         ),
                     entityTable.Config.Speed
@@ -651,20 +742,30 @@ Spawner.runEntity = function(entityTable)
             end
         end
 
-        task.spawn(entityTable.Debug.OnEntityFinishedRebound)
+        task.spawn(
+            entityTable.Debug.OnEntityFinishedRebound
+        )
 
         if cycle < cycleAmount then
-            task.wait(cyclesConfig.WaitTime)
+            task.wait(
+                cyclesConfig.WaitTime
+            )
         end
     end
 
-    for _, connection in next, entityConnections do
+    -- Destroy
+
+    for _, connection in next,
+        entityConnections do
+
         pcall(function()
             connection:Disconnect()
         end)
     end
 
-    task.spawn(entityTable.Debug.OnEntityDespawned)
+    task.spawn(
+        entityTable.Debug.OnEntityDespawned
+    )
 
     if entityModel.PrimaryPart then
         entityModel.PrimaryPart.Anchored = false
@@ -678,8 +779,6 @@ Spawner.runEntity = function(entityTable)
     end
 
     EntityConnections[entityModel] = nil
-
-    fixCamera()
 end
 
 -- Jumpscare
@@ -687,62 +786,120 @@ end
 Spawner.runJumpscare = function(config)
     config = config or {}
 
-    local image1 = LoadCustomAsset(config.Image1)
-    local image2 = LoadCustomAsset(config.Image2)
+    local image1 =
+        LoadCustomAsset(config.Image1)
+
+    local image2 =
+        LoadCustomAsset(config.Image2)
 
     local sound1 = nil
     local sound2 = nil
 
     if config.Sound1 then
-        sound1 = loadSound(config.Sound1)
+        sound1 =
+            loadSound(config.Sound1)
     end
 
     if config.Sound2 then
-        sound2 = loadSound(config.Sound2)
+        sound2 =
+            loadSound(config.Sound2)
     end
 
-    local JumpscareGui = Instance.new("ScreenGui")
-    local Background = Instance.new("Frame")
-    local Face = Instance.new("ImageLabel")
+    -- UI
 
-    JumpscareGui.Name = "JumpscareGui"
-    JumpscareGui.IgnoreGuiInset = true
-    JumpscareGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    local JumpscareGui =
+        Instance.new("ScreenGui")
 
-    Background.Name = "Background"
-    Background.BackgroundColor3 = Color3.new(0, 0, 0)
-    Background.BorderSizePixel = 0
-    Background.Size = UDim2.new(1, 0, 1, 0)
-    Background.ZIndex = 999
+    local Background =
+        Instance.new("Frame")
 
-    Face.Name = "Face"
-    Face.AnchorPoint = Vector2.new(0.5, 0.5)
-    Face.BackgroundTransparency = 1
-    Face.Position = UDim2.new(0.5, 0, 0.5, 0)
-    Face.Size = UDim2.new(0, 150, 0, 150)
-    Face.Image = image1
-    Face.ZIndex = 1000
+    local Face =
+        Instance.new("ImageLabel")
 
-    Face.Parent = Background
-    Background.Parent = JumpscareGui
-    JumpscareGui.Parent = CG
+    JumpscareGui.Name =
+        "JumpscareGui"
 
-    local teaseConfig = config.Tease or {
-        false,
-        Min = 1,
-        Max = 1
-    }
+    JumpscareGui.IgnoreGuiInset =
+        true
 
-    local absHeight = JumpscareGui.AbsoluteSize.Y
+    JumpscareGui.ZIndexBehavior =
+        Enum.ZIndexBehavior.Sibling
+
+    Background.Name =
+        "Background"
+
+    Background.BackgroundColor3 =
+        Color3.new(0, 0, 0)
+
+    Background.BorderSizePixel =
+        0
+
+    Background.Size =
+        UDim2.new(1, 0, 1, 0)
+
+    Background.ZIndex =
+        999
+
+    Face.Name =
+        "Face"
+
+    Face.AnchorPoint =
+        Vector2.new(0.5, 0.5)
+
+    Face.BackgroundTransparency =
+        1
+
+    Face.Position =
+        UDim2.new(0.5, 0, 0.5, 0)
+
+    Face.Size =
+        UDim2.new(
+            0,
+            150,
+            0,
+            150
+        )
+
+    Face.Image =
+        image1
+
+    Face.ZIndex =
+        1000
+
+    Face.Parent =
+        Background
+
+    Background.Parent =
+        JumpscareGui
+
+    JumpscareGui.Parent =
+        CG
+
+    -- Tease
+
+    local teaseConfig =
+        config.Tease or {
+            false,
+            Min = 1,
+            Max = 1
+        }
+
+    local absHeight =
+        JumpscareGui.AbsoluteSize.Y
 
     if absHeight <= 0 then
-        absHeight = workspace.CurrentCamera.ViewportSize.Y
+        absHeight =
+            workspace.CurrentCamera.ViewportSize.Y
     end
 
-    local minTeaseSize = absHeight / 5
-    local maxTeaseSize = absHeight / 2.5
+    local minTeaseSize =
+        absHeight / 5
+
+    local maxTeaseSize =
+        absHeight / 2.5
 
     if teaseConfig[1] then
+
         local teaseAmount =
             math.random(
                 teaseConfig.Min,
@@ -754,20 +911,26 @@ Spawner.runJumpscare = function(config)
         end
 
         for _ = 1, teaseAmount do
+
             task.wait(
                 math.random(100, 200) / 100
             )
 
             local growFactor =
-                (maxTeaseSize - minTeaseSize)
+                (
+                    maxTeaseSize
+                    - minTeaseSize
+                )
                 / teaseAmount
 
             Face.Size =
                 UDim2.new(
                     0,
-                    Face.AbsoluteSize.X + growFactor,
+                    Face.AbsoluteSize.X
+                        + growFactor,
                     0,
-                    Face.AbsoluteSize.Y + growFactor
+                    Face.AbsoluteSize.Y
+                        + growFactor
                 )
         end
 
@@ -776,12 +939,17 @@ Spawner.runJumpscare = function(config)
         )
     end
 
+    -- Flashing
+
     local flashingConfig =
         config.Flashing or {false}
 
     if flashingConfig[1] then
+
         task.spawn(function()
+
             while JumpscareGui.Parent do
+
                 Background.BackgroundColor3 =
                     flashingConfig[2]
                     or Color3.new(1, 1, 1)
@@ -804,11 +972,17 @@ Spawner.runJumpscare = function(config)
         end)
     end
 
+    -- Shake
+
     if config.Shake then
+
         task.spawn(function()
-            local origin = Face.Position
+
+            local origin =
+                Face.Position
 
             while JumpscareGui.Parent do
+
                 Face.Position =
                     origin
                     + UDim2.new(
@@ -826,7 +1000,10 @@ Spawner.runJumpscare = function(config)
         end)
     end
 
-    Face.Image = image2
+    -- Jumpscare
+
+    Face.Image =
+        image2
 
     Face.Size =
         UDim2.new(
@@ -844,14 +1021,16 @@ Spawner.runJumpscare = function(config)
         Face,
         TweenInfo.new(0.75),
         {
-            Size = UDim2.new(
-                0,
-                absHeight * 3,
-                0,
-                absHeight * 3
-            ),
+            Size =
+                UDim2.new(
+                    0,
+                    absHeight * 3,
+                    0,
+                    absHeight * 3
+                ),
 
-            ImageTransparency = 0.5
+            ImageTransparency =
+                0.5
         }
     ):Play()
 
@@ -868,24 +1047,30 @@ Spawner.runJumpscare = function(config)
     if sound2 then
         sound2:Destroy()
     end
-
-    fixCamera()
 end
 
 -- Scripts
 
-Plr.CharacterAdded:Connect(onCharacterAdded)
+Plr.CharacterAdded:Connect(
+    onCharacterAdded
+)
 
 if not SpawnerSetup then
+
     getgenv().SpawnerSetup = true
 
-    workspace.DescendantRemoving:Connect(function(descendant)
-        if descendant.Name == "PathfindNodes" then
-            pcall(function()
-                descendant:Clone().Parent = descendant.Parent
-            end)
+    workspace.DescendantRemoving:Connect(
+        function(descendant)
+
+            if descendant.Name == "PathfindNodes" then
+
+                pcall(function()
+                    descendant:Clone().Parent =
+                        descendant.Parent
+                end)
+            end
         end
-    end)
+    )
 end
 
 return Spawner
