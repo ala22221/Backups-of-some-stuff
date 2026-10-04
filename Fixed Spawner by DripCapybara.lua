@@ -1288,20 +1288,3 @@ Plr.CharacterAdded:Connect(
 )
 
 return Spawner
-```
-
-The important softlock fix is this part:
-
-```lua
-local deathGui =
-    Plr.PlayerGui.MainUI:FindFirstChild("Death")
-
-local helpfulDialogue = nil
-
-if deathGui then
-    helpfulDialogue =
-        deathGui:FindFirstChild(
-            "HelpfulDialogue",
-            true
-        )
-end
