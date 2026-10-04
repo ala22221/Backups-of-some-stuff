@@ -14,7 +14,7 @@ return function(data)
         frame.Size = UDim2.new(0, 0, 0, 0)
         frame.Frame.Position = UDim2.new(1.1, 0, 0, 0)
         frame.Visible = true
-        frame.Parent = Plr.PlayerGui.MainUI.AchievementsHolder
+        frame.Parent = Plr.PlayerGui.GlobalUI.AchievementsHolder
     
         frame.Sound:Play()
         frame:TweenSize(UDim2.new(1, 0, 0.2, 0), "In", "Quad", 0.8, true)
