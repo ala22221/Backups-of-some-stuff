@@ -1,4 +1,3 @@
-```lua
 --// Services
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,16 +12,10 @@ local Humanoid = Character:WaitForChild("Humanoid")
 
 local StaticRushSpeed = 60
 
---// Modules
-local SelfModules = {
-    DefaultConfig = loadstring(game:HttpGet(
-        "https://raw.githubusercontent.com/DripCapybara/Test/main/Doors/Backup/DefaultConfig.lua"
-    ))()
-}
-
-local ModuleScripts = {
-    ModuleEvents = require(ReplicatedStorage.ClientModules.Module_Events),
-}
+--// Default Config
+local DefaultConfig = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/DripCapybara/Test/main/Doors/Backup/DefaultConfig.lua"
+))()
 
 local EntityConnections = {}
 local Spawner = {}
@@ -48,9 +41,6 @@ end
 --==================================================
 -- CAMERA FIX
 --==================================================
--- Does NOT force CameraType.
--- Does NOT use Main_Game.camShaker.
--- Only restores CameraSubject when it is actually invalid.
 
 local function fixCamera()
     local Camera = workspace.CurrentCamera
@@ -63,17 +53,21 @@ local function fixCamera()
         return
     end
 
+    -- Do not interfere with cutscenes/death.
+    if Character:GetAttribute("IsDead") then
+        return
+    end
+
     local subject = Camera.CameraSubject
 
     if subject == nil or not subject.Parent then
         pcall(function()
             Camera.CameraSubject = Humanoid
         end)
+
         return
     end
 
-    -- If the camera somehow got assigned to something
-    -- completely unrelated to the player's character.
     if subject ~= Humanoid
         and not subject:IsDescendantOf(Character) then
 
@@ -85,11 +79,49 @@ end
 
 task.spawn(function()
     while task.wait(0.5) do
-        -- Don't interfere with normal cutscenes.
-        if not Character:GetAttribute("IsDead") then
-            fixCamera()
+        fixCamera()
+    end
+end)
+
+--==================================================
+-- OPTIONAL DOORS MODULE FINDER
+--==================================================
+
+local function findModule(moduleName)
+    for _, obj in ipairs(game:GetDescendants()) do
+        if obj:IsA("ModuleScript")
+            and obj.Name == moduleName then
+
+            return obj
         end
     end
+
+    return nil
+end
+
+local function getModuleEvents()
+    local module = findModule("Module_Events")
+
+    if not module then
+        return nil
+    end
+
+    local success, result = pcall(require, module)
+
+    if success then
+        return result
+    end
+
+    warn("Could not require Module_Events:", result)
+
+    return nil
+end
+
+local ModuleEvents = nil
+
+-- Try to find the module, but DON'T fail the whole spawner
+pcall(function()
+    ModuleEvents = getModuleEvents()
 end)
 
 --==================================================
@@ -158,6 +190,7 @@ local function dragEntity(entityModel, position, speed)
     if not entityModel
         or not entityModel.Parent
         or not entityModel.PrimaryPart then
+
         return
     end
 
@@ -189,7 +222,7 @@ end
 
 local function GetGitModel(modelUrl, modelName)
 
-    -- RBX asset ID
+    -- Roblox asset ID
     if modelUrl:match("^rbxassetid://") then
 
         local success, objects = pcall(function()
@@ -242,7 +275,6 @@ local function GetGitModel(modelUrl, modelName)
         end
     end
 
-    -- Convert local file into Roblox asset
     local customAsset
 
     local assetSuccess, assetError = pcall(function()
@@ -259,7 +291,6 @@ local function GetGitModel(modelUrl, modelName)
         return nil
     end
 
-    -- Load RBXM
     local objectSuccess, objects = pcall(function()
         return game:GetObjects(customAsset)
     end)
@@ -288,8 +319,7 @@ Spawner.createEntity = function(config)
 
     config = config or {}
 
-    -- Fill missing config options
-    for i, value in next, SelfModules.DefaultConfig do
+    for i, value in next, DefaultConfig do
         if config[i] == nil then
             config[i] = value
         end
@@ -298,7 +328,6 @@ Spawner.createEntity = function(config)
     config.Speed =
         StaticRushSpeed / 100 * config.Speed
 
-    -- Load model
     local entityModel = GetGitModel(
         config.Model,
         "CustomModel_" .. tostring(math.random(1, 100000000))
@@ -307,12 +336,14 @@ Spawner.createEntity = function(config)
     if not entityModel then
         warn("FAILED TO CREATE ENTITY MODEL")
         warn("Model:", config.Model)
+
         return nil
     end
 
     if entityModel.ClassName ~= "Model" then
+
         warn(
-            "Entity is not a Model:",
+            "Downloaded object is not a Model:",
             entityModel.ClassName
         )
 
@@ -328,7 +359,8 @@ Spawner.createEntity = function(config)
         or entityModel:FindFirstChildWhichIsA("BasePart")
 
     if not entityModel.PrimaryPart then
-        warn("Entity has no PrimaryPart/BasePart")
+
+        warn("Entity model has no BasePart")
 
         pcall(function()
             entityModel:Destroy()
@@ -353,8 +385,7 @@ Spawner.createEntity = function(config)
         false
     )
 
-    -- ALWAYS create Debug table
-    local entityTable = {
+    return {
         Model = entityModel,
 
         Config = config,
@@ -369,8 +400,6 @@ Spawner.createEntity = function(config)
             OnDeath = function() end
         }
     }
-
-    return entityTable
 end
 
 --==================================================
@@ -385,30 +414,34 @@ Spawner.runEntity = function(entityTable)
     end
 
     if not entityTable.Model then
-        warn("runEntity: entityTable.Model is nil")
+        warn("runEntity: Model is nil")
         return
     end
 
     if not entityTable.Debug then
-        warn("runEntity: entityTable.Debug is nil")
+        warn("runEntity: Debug is nil")
         return
     end
 
     local nodes = {}
 
     --==================================================
-    -- FIND NODES
+    -- FIND PATH NODES
     --==================================================
 
-    for _, room in next, workspace.CurrentRooms:GetChildren() do
+    for _, room in next,
+        workspace.CurrentRooms:GetChildren() do
 
         local pathfindNodes =
             room:FindFirstChild("PathfindNodes")
 
         if pathfindNodes then
+
             pathfindNodes =
                 pathfindNodes:GetChildren()
+
         else
+
             local fakeNode =
                 Instance.new("Part")
 
@@ -491,7 +524,9 @@ Spawner.runEntity = function(entityTable)
     -- FLICKER
     --==================================================
 
-    if entityTable.Config.FlickerLights[1] then
+    if entityTable.Config.FlickerLights[1]
+        and ModuleEvents
+        and ModuleEvents.flicker then
 
         local latestRoom =
             workspace.CurrentRooms[
@@ -500,7 +535,7 @@ Spawner.runEntity = function(entityTable)
 
         if latestRoom then
             pcall(function()
-                ModuleScripts.ModuleEvents.flicker(
+                ModuleEvents.flicker(
                     latestRoom,
                     entityTable.Config.FlickerLights[2]
                 )
@@ -528,6 +563,7 @@ Spawner.runEntity = function(entityTable)
             if not entityModel.Parent
                 or not entityModel.PrimaryPart
                 or entityModel:GetAttribute("NoAI") then
+
                 return
             end
 
@@ -568,7 +604,10 @@ Spawner.runEntity = function(entityTable)
                     }
                 ) == nil
 
-            -- Room detection
+            --==================================================
+            -- ROOM DETECTION
+            --==================================================
+
             if floorRay
                 and floorRay.Name == "Floor" then
 
@@ -589,9 +628,14 @@ Spawner.runEntity = function(entityTable)
                             room
                         )
 
-                        if entityTable.Config.BreakLights then
+                        -- Break lights only if
+                        -- Module_Events exists
+                        if entityTable.Config.BreakLights
+                            and ModuleEvents
+                            and ModuleEvents.shatter then
+
                             pcall(function()
-                                ModuleScripts.ModuleEvents.shatter(room)
+                                ModuleEvents.shatter(room)
                             end)
                         end
 
@@ -603,13 +647,9 @@ Spawner.runEntity = function(entityTable)
             --==================================================
             -- CAMERA SHAKE
             --==================================================
-            -- INTENTIONALLY DISABLED.
-            --
-            -- The old code called:
-            -- MainGame.camShaker:ShakeOnce(...)
-            --
-            -- That is the part most likely to conflict
-            -- with the current DOORS camera controller.
+            -- Intentionally disabled.
+            -- This avoids conflicts with newer DOORS
+            -- camera controllers.
 
             --==================================================
             -- PLAYER DETECTION
@@ -649,6 +689,7 @@ Spawner.runEntity = function(entityTable)
 
                     task.spawn(function()
 
+                        -- Prevent cutscene deaths
                         if workspace.Ambience_FigureEnd.Playing
                             or workspace.Ambience_FigureStart.Playing
                             or workspace.Ambience_Figure.Playing
@@ -656,6 +697,7 @@ Spawner.runEntity = function(entityTable)
                             or workspace:FindFirstChild("Blink")
                             or workspace:FindFirstChild("SeekMoving")
                             or workspace:FindFirstChild("Atumalaca") then
+
                             return
                         end
 
@@ -670,6 +712,7 @@ Spawner.runEntity = function(entityTable)
 
                             if v.ClassName == "Sound"
                                 and v.Playing then
+
                                 v:Stop()
                             end
                         end
@@ -753,7 +796,6 @@ Spawner.runEntity = function(entityTable)
 
             dragEntity(
                 entityModel,
-
                 nodes[nodeIdx].Position
                     + Vector3.new(
                         0,
@@ -761,7 +803,6 @@ Spawner.runEntity = function(entityTable)
                             + entityTable.Config.HeightOffset,
                         0
                     ),
-
                 entityTable.Config.Speed
             )
         end
@@ -773,7 +814,6 @@ Spawner.runEntity = function(entityTable)
 
                 dragEntity(
                     entityModel,
-
                     nodes[nodeIdx].Position
                         + Vector3.new(
                             0,
@@ -781,7 +821,6 @@ Spawner.runEntity = function(entityTable)
                                 + entityTable.Config.HeightOffset,
                             0
                         ),
-
                     entityTable.Config.Speed
                 )
             end
@@ -827,10 +866,7 @@ Spawner.runEntity = function(entityTable)
 
     EntityConnections[entityModel] = nil
 
-    -- Repair camera AFTER entity is gone
-    if not Character:GetAttribute("IsDead") then
-        fixCamera()
-    end
+    fixCamera()
 end
 
 --==================================================
@@ -855,7 +891,6 @@ Spawner.runJumpscare = function(config)
         config.Sound2
         and loadSound(config.Sound2)
 
-    -- UI
     local JumpscareGui =
         Instance.new("ScreenGui")
 
@@ -880,33 +915,48 @@ Spawner.runJumpscare = function(config)
     Background.BackgroundColor3 =
         Color3.new(0, 0, 0)
 
-    Background.BorderSizePixel = 0
+    Background.BorderSizePixel =
+        0
 
     Background.Size =
         UDim2.new(1, 0, 1, 0)
 
     Background.ZIndex = 999
 
-    Face.Name = "Face"
+    Face.Name =
+        "Face"
 
     Face.AnchorPoint =
         Vector2.new(0.5, 0.5)
 
-    Face.BackgroundTransparency = 1
+    Face.BackgroundTransparency =
+        1
 
     Face.Position =
         UDim2.new(0.5, 0, 0.5, 0)
 
     Face.Size =
-        UDim2.new(0, 150, 0, 150)
+        UDim2.new(
+            0,
+            150,
+            0,
+            150
+        )
 
-    Face.Image = image1
+    Face.Image =
+        image1
 
-    Face.ZIndex = 1000
+    Face.ZIndex =
+        1000
 
-    Face.Parent = Background
-    Background.Parent = JumpscareGui
-    JumpscareGui.Parent = CoreGui
+    Face.Parent =
+        Background
+
+    Background.Parent =
+        JumpscareGui
+
+    JumpscareGui.Parent =
+        CoreGui
 
     --==================================================
     -- TEASE
@@ -971,7 +1021,7 @@ Spawner.runJumpscare = function(config)
     end
 
     --==================================================
-    -- FLASHING
+    -- FLASH
     --==================================================
 
     local flashing =
@@ -1040,7 +1090,8 @@ Spawner.runJumpscare = function(config)
     -- FINAL JUMPSCARE
     --==================================================
 
-    Face.Image = image2
+    Face.Image =
+        image2
 
     Face.Size =
         UDim2.new(
@@ -1066,7 +1117,8 @@ Spawner.runJumpscare = function(config)
                     height * 3
                 ),
 
-            ImageTransparency = 0.5
+            ImageTransparency =
+                0.5
         }
     ):Play()
 
@@ -1084,10 +1136,7 @@ Spawner.runJumpscare = function(config)
         sound2:Destroy()
     end
 
-    -- Only repair if the player isn't dead
-    if not Character:GetAttribute("IsDead") then
-        fixCamera()
-    end
+    fixCamera()
 end
 
 --==================================================
