@@ -69,6 +69,20 @@ local function fixCamera()
     end
 end
 
+local function soundPlaying(name)
+    local sound = workspace:FindFirstChild(name)
+
+    return sound
+        and sound:IsA("Sound")
+        and sound.Playing
+end
+
+task.spawn(function()
+    while task.wait(0.5) do
+        fixCamera()
+    end
+end)
+
 local function loadSound(soundData)
     if not soundData then
         return nil
@@ -153,10 +167,13 @@ local function normalizeGithubUrl(url)
     url = tostring(url)
 
     local repo, branch, path =
-        url:match("https://github%.com/([^/]+/[^/]+)/blob/([^/]+)/(.*)")
+        url:match(
+            "https://github%.com/([^/]+/[^/]+)/blob/([^/]+)/(.*)"
+        )
 
     if repo and branch and path then
         path = path:gsub("%?raw=true", "")
+
         return "https://raw.githubusercontent.com/"
             .. repo
             .. "/"
@@ -284,7 +301,10 @@ Spawner.createEntity = function(config)
     end
 
     if entityModel.ClassName ~= "Model" then
-        warn("Downloaded object is not a Model:", entityModel.ClassName)
+        warn(
+            "Downloaded object is not a Model:",
+            entityModel.ClassName
+        )
 
         pcall(function()
             entityModel:Destroy()
@@ -513,13 +533,17 @@ Spawner.runEntity = function(entityTable)
                     <= entityTable.Config.KillRange then
 
                     task.spawn(function()
-                        if workspace.Ambience_FigureEnd.Playing
-                            or workspace.Ambience_FigureStart.Playing
-                            or workspace.Ambience_Figure.Playing
-                            or workspace.Ambience_Seek.Playing
+                        if soundPlaying("Ambience_FigureEnd")
+                            or soundPlaying("Ambience_FigureStart")
+                            or soundPlaying("Ambience_Figure")
+                            or soundPlaying("Ambience_Seek")
                             or workspace:FindFirstChild("Blink")
                             or workspace:FindFirstChild("SeekMoving")
                             or workspace:FindFirstChild("Atumalaca") then
+                            return
+                        end
+
+                        if Char:GetAttribute("IsDead") then
                             return
                         end
 
@@ -534,7 +558,9 @@ Spawner.runEntity = function(entityTable)
                             end
                         end
 
-                        if entityTable.Config.Jumpscare[1] then
+                        if entityTable.Config.Jumpscare
+                            and entityTable.Config.Jumpscare[1] then
+
                             Spawner.runJumpscare(
                                 entityTable.Config.Jumpscare[2]
                             )
@@ -557,7 +583,9 @@ Spawner.runEntity = function(entityTable)
                                 entityModel.Name
                         end
 
-                        if #entityTable.Config.CustomDialog > 0 then
+                        if entityTable.Config.CustomDialog
+                            and #entityTable.Config.CustomDialog > 0 then
+
                             pcall(function()
                                 firesignal(
                                     ReSt.EntityInfo.DeathHint.OnClientEvent,
@@ -822,6 +850,7 @@ Spawner.runJumpscare = function(config)
                 0,
                 absHeight * 3
             ),
+
             ImageTransparency = 0.5
         }
     ):Play()
