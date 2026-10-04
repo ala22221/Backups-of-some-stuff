@@ -4,7 +4,7 @@ local TS = game:GetService("TweenService")
 local Plr = Players.LocalPlayer
 return function(data)
     task.spawn(function()
-        local frame = Plr.PlayerGui.MainUI.AchievementsHolder.Achievement:Clone()
+        local frame = Plr.PlayerGui.GlobalUI.AchievementsHolder.Achievement:Clone()
 
         frame.Name = "LiveAchievement"
         frame.Frame.Details.Title.Text = data.Title
