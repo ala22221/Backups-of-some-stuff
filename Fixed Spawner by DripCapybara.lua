@@ -1055,22 +1055,5 @@ Plr.CharacterAdded:Connect(
     onCharacterAdded
 )
 
-if not SpawnerSetup then
-
-    getgenv().SpawnerSetup = true
-
-    workspace.DescendantRemoving:Connect(
-        function(descendant)
-
-            if descendant.Name == "PathfindNodes" then
-
-                pcall(function()
-                    descendant:Clone().Parent =
-                        descendant.Parent
-                end)
-            end
-        end
-    )
-end
 
 return Spawner
