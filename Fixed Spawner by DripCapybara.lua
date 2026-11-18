@@ -98,7 +98,7 @@ Spawner.createEntity = function(config)
     end
   end
 
-    local entityModel = GetGitModel(config.Model,"CustomModel_"..tostring(math.random(1,100000000))
+    local entityModel = GetGitModel(config.Model,"CustomModel_"..tostring(math.random(1,100000000)))
 
     if typeof(entityModel) == "Instance" and entityModel.ClassName == "Model" then
         entityModel.PrimaryPart = entityModel.PrimaryPart or entityModel:FindFirstChildWhichIsA("BasePart")
