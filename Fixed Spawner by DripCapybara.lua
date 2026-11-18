@@ -98,7 +98,7 @@ Spawner.createEntity = function(config)
     end
   end
 
-    local entityModel = GetGitModel(config.Model,"CustomModel_"..tostring(math.random(1,100000000)))
+    local entityModel = GetGitModel(config.Model, "CustomModel_" .. tostring(math.random(1, 100000000)))
 
     if typeof(entityModel) == "Instance" and entityModel.ClassName == "Model" then
         entityModel.PrimaryPart = entityModel.PrimaryPart or entityModel:FindFirstChildWhichIsA("BasePart")
@@ -135,30 +135,74 @@ Spawner.createEntity = function(config)
 end
 
 Spawner.runEntity = function(entityTable)
-    -- Nodes
+    -- Nodes (supports current DOORS and The Hotel - Vision)
 
     local nodes = {}
+    local currentRooms = workspace:FindFirstChild("CurrentRooms")
 
-    for _, room in next, workspace.CurrentRooms:GetChildren() do
-        local pathfindNodes = room:FindFirstChild("PathfindNodes")
-        
-        if pathfindNodes then
-            pathfindNodes = pathfindNodes:GetChildren()
-        else
-            local fakeNode = Instance.new("Part")
-            fakeNode.Name = "1"
-            fakeNode.CFrame = room:WaitForChild("RoomExit").CFrame - Vector3.new(0, room.RoomExit.Size.Y / 2, 0)
+    if not currentRooms then
+        warn("Spawner: Workspace.CurrentRooms was not found!")
+        return
+    end
 
-            pathfindNodes = {fakeNode}
+    for _, room in next, currentRooms:GetChildren() do
+        -- Current DOORS uses PathfindNodes; Hotel - Vision uses Nodes.
+        local nodeFolder = room:FindFirstChild("PathfindNodes")
+            or room:FindFirstChild("Nodes")
+
+        local roomNodes = {}
+
+        if nodeFolder then
+            for _, node in next, nodeFolder:GetChildren() do
+                if node:IsA("BasePart") then
+                    roomNodes[#roomNodes + 1] = node
+                end
+            end
         end
 
-        table.sort(pathfindNodes, function(a, b)
-            return tonumber(a.Name) < tonumber(b.Name)
+        -- Fallbacks for rooms that do not contain either node folder.
+        if #roomNodes == 0 then
+            local roomStart = room:FindFirstChild("RoomStart")
+            local roomEnd = room:FindFirstChild("RoomEnd")
+            local roomExit = room:FindFirstChild("RoomExit")
+
+            if roomStart and roomStart:IsA("BasePart") then
+                roomNodes[#roomNodes + 1] = roomStart
+            end
+
+            if roomEnd and roomEnd:IsA("BasePart") then
+                roomNodes[#roomNodes + 1] = roomEnd
+            end
+
+            if #roomNodes == 0 and roomExit and roomExit:IsA("BasePart") then
+                roomNodes[#roomNodes + 1] = roomExit
+            end
+        end
+
+        -- Sort within each room so the room order remains intact.
+        table.sort(roomNodes, function(a, b)
+            local numberA = tonumber(a.Name)
+            local numberB = tonumber(b.Name)
+
+            if numberA and numberB then
+                return numberA < numberB
+            elseif numberA then
+                return true
+            elseif numberB then
+                return false
+            end
+
+            return a.Name < b.Name
         end)
 
-        for _, node in next, pathfindNodes do
+        for _, node in next, roomNodes do
             nodes[#nodes + 1] = node
         end
+    end
+
+    if #nodes == 0 then
+        warn("Spawner: No valid pathfinding nodes found in CurrentRooms!")
+        return
     end
 
     -- Spawn
@@ -200,8 +244,13 @@ Spawner.runEntity = function(entityTable)
 
     entityConnections.movementTick = RS.Stepped:Connect(function()
         if entityModel.Parent and not entityModel:GetAttribute("NoAI") then
+            local playerRoot = getPlayerRoot()
+            if not playerRoot or not entityModel.PrimaryPart then
+                return
+            end
+
             local entityPos = entityModel.PrimaryPart.Position
-            local rootPos = getPlayerRoot().Position
+            local rootPos = playerRoot.Position
             local floorRay = FindPartOnRayWithIgnoreList(workspace, Ray.new(entityPos, Vector3.new(0, -10, 0)), {entityModel, Char})
             local playerInSight = FindPartOnRayWithIgnoreList(workspace, Ray.new(entityPos, rootPos - entityPos), {entityModel, Char}) == nil
             
