@@ -67,6 +67,11 @@ end
 
 function dragEntity(entityModel, pos, speed)
     local Distance = (entityModel.PrimaryPart.Position-pos).Magnitude
+    speed = tonumber(speed) or 0
+    if speed <= 0 then
+        warn("Spawner: Entity speed must be greater than zero!")
+        return
+    end
     local Time = Distance / speed
 
     local Tween = TS:Create(entityModel.PrimaryPart,TweenInfo.new(Time,Enum.EasingStyle.Linear,Enum.EasingDirection.Out),{Position = pos})
@@ -145,23 +150,65 @@ Spawner.runEntity = function(entityTable)
         return
     end
 
-    for _, room in next, currentRooms:GetChildren() do
-        -- Current DOORS uses PathfindNodes; Hotel - Vision uses Nodes.
-        local nodeFolder = room:FindFirstChild("PathfindNodes")
-            or room:FindFirstChild("Nodes")
+    -- Get rooms in numeric order (GetChildren() order is not guaranteed).
+    local rooms = currentRooms:GetChildren()
+    table.sort(rooms, function(a, b)
+        local numberA = tonumber(a.Name)
+        local numberB = tonumber(b.Name)
+        if numberA and numberB then
+            return numberA < numberB
+        elseif numberA then
+            return true
+        elseif numberB then
+            return false
+        end
+        return a.Name < b.Name
+    end)
 
+    for _, room in ipairs(rooms) do
+        local pathfindNodes = room:FindFirstChild("PathfindNodes")
+        local hotelNodes = room:FindFirstChild("Nodes")
         local roomNodes = {}
 
-        if nodeFolder then
-            for _, node in next, nodeFolder:GetChildren() do
+        if pathfindNodes then
+            -- Current DOORS: use PathfindNodes.
+            for _, node in ipairs(pathfindNodes:GetChildren()) do
                 if node:IsA("BasePart") then
                     roomNodes[#roomNodes + 1] = node
                 end
             end
-        end
+        elseif hotelNodes then
+            -- The Hotel - Vision: RoomStart -> Nodes -> RoomEnd.
+            local roomStart = room:FindFirstChild("RoomStart")
+            local roomEnd = room:FindFirstChild("RoomEnd")
 
-        -- Fallbacks for rooms that do not contain either node folder.
-        if #roomNodes == 0 then
+            if roomStart and roomStart:IsA("BasePart") then
+                roomNodes[#roomNodes + 1] = roomStart
+            end
+
+            local numberedNodes = {}
+            for _, node in ipairs(hotelNodes:GetChildren()) do
+                if node:IsA("BasePart") then
+                    numberedNodes[#numberedNodes + 1] = node
+                end
+            end
+            table.sort(numberedNodes, function(a, b)
+                local na, nb = tonumber(a.Name), tonumber(b.Name)
+                if na and nb then return na < nb end
+                if na then return true end
+                if nb then return false end
+                return a.Name < b.Name
+            end)
+
+            for _, node in ipairs(numberedNodes) do
+                roomNodes[#roomNodes + 1] = node
+            end
+
+            if roomEnd and roomEnd:IsA("BasePart") then
+                roomNodes[#roomNodes + 1] = roomEnd
+            end
+        else
+            -- Fallback for rooms without either node folder.
             local roomStart = room:FindFirstChild("RoomStart")
             local roomEnd = room:FindFirstChild("RoomEnd")
             local roomExit = room:FindFirstChild("RoomExit")
@@ -169,33 +216,15 @@ Spawner.runEntity = function(entityTable)
             if roomStart and roomStart:IsA("BasePart") then
                 roomNodes[#roomNodes + 1] = roomStart
             end
-
             if roomEnd and roomEnd:IsA("BasePart") then
                 roomNodes[#roomNodes + 1] = roomEnd
             end
-
             if #roomNodes == 0 and roomExit and roomExit:IsA("BasePart") then
                 roomNodes[#roomNodes + 1] = roomExit
             end
         end
 
-        -- Sort within each room so the room order remains intact.
-        table.sort(roomNodes, function(a, b)
-            local numberA = tonumber(a.Name)
-            local numberB = tonumber(b.Name)
-
-            if numberA and numberB then
-                return numberA < numberB
-            elseif numberA then
-                return true
-            elseif numberB then
-                return false
-            end
-
-            return a.Name < b.Name
-        end)
-
-        for _, node in next, roomNodes do
+        for _, node in ipairs(roomNodes) do
             nodes[#nodes + 1] = node
         end
     end
@@ -276,7 +305,7 @@ Spawner.runEntity = function(entityTable)
             -- Camera shaking
             
             local shakeConfig = entityTable.Config.CamShake
-            local shakeMag = (getPlayerRoot().Position - entityModel.PrimaryPart.Position).Magnitude
+            local shakeMag = (playerRoot.Position - entityModel.PrimaryPart.Position).Magnitude
 
             if shakeConfig[1] and shakeMag <= shakeConfig[3] then
                 local shakeRep = {}
@@ -302,11 +331,11 @@ Spawner.runEntity = function(entityTable)
 
                 -- Kill player
 
-                if entityTable.Config.CanKill and not Char:GetAttribute("IsDead") and not Char:GetAttribute("Hiding") and (getPlayerRoot().Position - entityModel.PrimaryPart.Position).Magnitude <= entityTable.Config.KillRange then  
+                if entityTable.Config.CanKill and not Char:GetAttribute("IsDead") and not Char:GetAttribute("Hiding") and (playerRoot.Position - entityModel.PrimaryPart.Position).Magnitude <= entityTable.Config.KillRange then  
                       task.spawn(function()  
 
                           -- Prevent Cutscene Death
-                          if workspace.Ambience_FigureEnd.Playing or workspace.Ambience_FigureStart.Playing or workspace.Ambience_Figure.Playing or workspace.Ambience_Seek.Playing or workspace:FindFirstChild("Blink") or workspace:FindFirstChild("SeekMoving") or workspace:FindFirstChild("Atumalaca") then  
+                          if workspace.Ambience_FigureEnd.Playing or workspace.Ambience_FigureStart.Playing or workspace.Ambience_Figure.Playing or workspace.Ambience_Seek.Playing or workspace:FindFirstChild("Blink") or workspace:FindFirstChild("SeekMovingNewClone") or workspace:FindFirstChild("Atumalaca") then  
                              return  
                           end  
                           Char:SetAttribute("IsDead", true)
