@@ -34,6 +34,10 @@ local ModuleScripts = {
 local EntityConnections = {}
 local Spawner = {}
 
+-- Shared death lock: only one entity handles a given character death.
+-- It resets when the player respawns, allowing any remaining entity to kill again.
+local deathInProgress = false
+
 -- Safe Destroy
 
 local function safeDestroy(object)
@@ -47,6 +51,7 @@ end
 local function onCharacterAdded(char)
     Char = char
     Hum = char:WaitForChild("Humanoid")
+    deathInProgress = false
 end
 
 local function getPlayerRoot()
@@ -592,11 +597,23 @@ Spawner.runEntity = function(entityTable)
 
             -- Kill Player
 
+            local victimCharacter = Char
+            local victimHumanoid = victimCharacter and victimCharacter:FindFirstChildOfClass("Humanoid")
+
             if entityTable.Config.CanKill
-                and not Char:GetAttribute("IsDead")
-                and not Char:GetAttribute("Hiding")
+                and not deathInProgress
+                and victimCharacter
+                and victimCharacter.Parent
+                and not victimCharacter:GetAttribute("IsDead")
+                and not victimCharacter:GetAttribute("Hiding")
+                and victimHumanoid
+                and victimHumanoid.Health > 0
                 and (playerRoot.Position - entityModel.PrimaryPart.Position).Magnitude
-                    <= entityTable.Config.KillRange then
+                    <= (entityTable.Config.KillRange or 0) then
+
+                -- Claim the death before yielding, preventing duplicate handlers
+                -- from this entity or any other entity on the same frame.
+                deathInProgress = true
 
                 task.spawn(function()
                     local floorReplicated = ReSt:FindFirstChild("FloorReplicated")
@@ -607,14 +624,19 @@ Spawner.runEntity = function(entityTable)
                         or (seekMusic and seekMusic:IsA("Sound") and seekMusic.Playing)
                         or workspace:FindFirstChild("Blink")
                         or workspace:FindFirstChild("Atumalaca") then
+                        deathInProgress = false
                         return
                     end
 
-                    if not Char or not Char.Parent then
+                    if not victimCharacter.Parent
+                        or victimCharacter ~= Char
+                        or not victimHumanoid.Parent
+                        or victimHumanoid.Health <= 0 then
+                        deathInProgress = false
                         return
                     end
 
-                    Char:SetAttribute("IsDead", true)
+                    victimCharacter:SetAttribute("IsDead", true)
 
                     for _, v in ipairs(entityModel:GetDescendants()) do
                         if v:IsA("Sound") and v.Playing then
@@ -624,20 +646,18 @@ Spawner.runEntity = function(entityTable)
 
                     if entityTable.Config.Jumpscare
                         and entityTable.Config.Jumpscare[1] then
-
                         Spawner.runJumpscare(entityTable.Config.Jumpscare[2])
                     end
 
                     task.spawn(entityTable.Debug.OnDeath)
 
-                    if Hum and Hum.Parent then
-                        Hum.Health = 0
+                    if victimHumanoid and victimHumanoid.Parent then
+                        victimHumanoid.Health = 0
                     end
 
                     local gameStats = ReSt:FindFirstChild("GameStats")
                     local playerStats = gameStats
                         and gameStats:FindFirstChild("Player_" .. Plr.Name)
-
                     local total = playerStats and playerStats:FindFirstChild("Total")
                     local deathCause = total and total:FindFirstChild("DeathCause")
 
@@ -645,7 +665,8 @@ Spawner.runEntity = function(entityTable)
                         deathCause.Value = entityModel.Name
                     end
 
-                    if #entityTable.Config.CustomDialog > 0 then
+                    if entityTable.Config.CustomDialog
+                        and #entityTable.Config.CustomDialog > 0 then
                         local entityInfo = ReSt:FindFirstChild("EntityInfo")
                         local deathHint = entityInfo
                             and entityInfo:FindFirstChild("DeathHint")
