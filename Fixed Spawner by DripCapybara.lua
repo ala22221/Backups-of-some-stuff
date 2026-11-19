@@ -128,34 +128,58 @@ local function loadSound(soundData)
 end
 
 -- Entity Movement
+-- Move the entire model with PivotTo instead of tweening only its PrimaryPart.
+-- This also works for models whose other parts are not welded to the PrimaryPart.
 
 local function dragEntity(entityModel, pos, speed)
     if not entityModel or not entityModel.Parent or not entityModel.PrimaryPart then
-        return
+        return false
     end
 
     speed = tonumber(speed) or 0
 
     if speed <= 0 then
         warn("Spawner: Invalid movement speed:", speed)
-        return
+        return false
     end
 
-    local primaryPart = entityModel.PrimaryPart
-    local distance = (primaryPart.Position - pos).Magnitude
+    local startPivot = entityModel:GetPivot()
+    local distance = (startPivot.Position - pos).Magnitude
 
-    if distance <= 0.001 then
-        return
+    if distance <= 0.01 then
+        return true
     end
+
+    local rotation = startPivot - startPivot.Position
+    local targetPivot = CFrame.new(pos) * rotation
+    local duration = math.max(distance / speed, 0.03)
+
+    local pivotValue = Instance.new("CFrameValue")
+    pivotValue.Value = startPivot
+
+    local changedConnection = pivotValue:GetPropertyChangedSignal("Value"):Connect(function()
+        if entityModel and entityModel.Parent then
+            entityModel:PivotTo(pivotValue.Value)
+        end
+    end)
 
     local tween = TS:Create(
-        primaryPart,
-        TweenInfo.new(distance / speed, Enum.EasingStyle.Linear),
-        {Position = pos}
+        pivotValue,
+        TweenInfo.new(duration, Enum.EasingStyle.Linear),
+        {Value = targetPivot}
     )
 
     tween:Play()
-    tween.Completed:Wait()
+    local playbackState = tween.Completed:Wait()
+
+    if changedConnection then
+        changedConnection:Disconnect()
+    end
+
+    tween:Destroy()
+    pivotValue:Destroy()
+
+    return playbackState == Enum.PlaybackState.Completed
 end
 
 -- Room Sorting
@@ -670,68 +694,103 @@ Spawner.runEntity = function(entityTable)
     task.spawn(entityTable.Debug.OnEntityStartMoving)
 
     -- Route Movement
-    -- Refreshes route when new rooms or nodes load.
+    -- Rebuild the route while moving so newly loaded rooms are included.
 
-    local cyclesConfig = entityTable.Config.Cycles
-    local totalCycles = math.max(
-        math.random(cyclesConfig.Min, cyclesConfig.Max),
-        1
-    )
+    local cyclesConfig = entityTable.Config.Cycles or {
+        Min = 1,
+        Max = 1,
+        WaitTime = 0
+    }
 
-    local currentIndex = backwards and #nodes or 1
+    local minCycles = math.max(1, tonumber(cyclesConfig.Min) or 1)
+    local maxCycles = math.max(minCycles, tonumber(cyclesConfig.Max) or minCycles)
+    local totalCycles = math.random(minCycles, maxCycles)
     local direction = backwards and -1 or 1
+    local heightOffset = 3.5 + (entityTable.Config.HeightOffset or 0)
 
     for cycle = 1, totalCycles do
+        if not entityModel.Parent then
+            break
+        end
+
         local visited = {}
+        local lastRouteChange = os.clock()
+        local previousRoute = nil
 
         while entityModel.Parent do
-            -- Refresh route as rooms load.
-
             local updatedNodes = collectRoute(currentRooms)
 
             if #updatedNodes == 0 then
                 task.wait(0.2)
+                if os.clock() - lastRouteChange > 8 then
+                    warn("Spawner: No route nodes became available; ending movement.")
+                    break
+                end
                 continue
+            end
+
+            local routeChanged = previousRoute == nil or #previousRoute ~= #updatedNodes
+
+            if not routeChanged then
+                for i = 1, #updatedNodes do
+                    if previousRoute[i] ~= updatedNodes[i] then
+                        routeChanged = true
+                        break
+                    end
+                end
+            end
+
+            if routeChanged then
+                previousRoute = table.clone(updatedNodes)
+                lastRouteChange = os.clock()
             end
 
             nodes = updatedNodes
 
-            if currentIndex > #nodes then
-                currentIndex = #nodes
+            -- Pick the next node that this cycle has not visited yet.
+            local nextNode = nil
+
+            if direction == 1 then
+                for i = 1, #nodes do
+                    local candidate = nodes[i]
+                    if candidate and candidate.Parent and not visited[candidate] then
+                        nextNode = candidate
+                        break
+                    end
+                end
+            else
+                for i = #nodes, 1, -1 do
+                    local candidate = nodes[i]
+                    if candidate and candidate.Parent and not visited[candidate] then
+                        nextNode = candidate
+                        break
+                    end
+                end
             end
 
-            if currentIndex < 1 then
-                currentIndex = 1
-            end
+            if nextNode then
+                visited[nextNode] = true
+                lastRouteChange = os.clock()
 
-            local node = nodes[currentIndex]
+                print("Spawner: Moving to node", nextNode:GetFullName())
 
-            if not node or not node.Parent then
-                task.wait(0.1)
-                continue
-            end
-
-            if not visited[node] then
-                visited[node] = true
-
-                dragEntity(
+                local moved = dragEntity(
                     entityModel,
-                    node.Position + Vector3.new(
-                        0,
-                        3.5 + (entityTable.Config.HeightOffset or 0),
-                        0
-                    ),
+                    nextNode.Position + Vector3.new(0, heightOffset, 0),
                     entityTable.Config.Speed
                 )
-            end
 
-            currentIndex += direction
+                if not moved and entityModel.Parent then
+                    task.wait(0.1)
+                end
+            else
+                -- All currently loaded nodes have been visited. Give the game
+                -- a moment to stream in the next room before ending this pass.
+                task.wait(0.2)
 
-            -- End of currently loaded route.
-            -- Wait for the next room to load.
-
-            if currentIndex > #nodes or currentIndex < 1 then
-                break
+                if os.clock() - lastRouteChange >= 3 then
+                    break
+                end
             end
         end
 
@@ -739,9 +798,8 @@ Spawner.runEntity = function(entityTable)
             break
         end
 
-        -- Rebound return trip
-
-        if cyclesConfig.Max > 1 then
+        -- Rebound return trip. Use the latest route, in reverse order.
+        if cyclesConfig.Max > 1 and cycle < totalCycles then
             local returnNodes = collectRoute(currentRooms)
 
             for i = #returnNodes, 1, -1 do
@@ -750,15 +808,10 @@ Spawner.runEntity = function(entityTable)
                 end
 
                 local node = returnNodes[i]
-
                 if node and node.Parent then
                     dragEntity(
                         entityModel,
-                        node.Position + Vector3.new(
-                            0,
-                            3.5 + (entityTable.Config.HeightOffset or 0),
-                            0
-                        ),
+                        node.Position + Vector3.new(0, heightOffset, 0),
                         entityTable.Config.Speed
                     )
                 end
@@ -768,7 +821,7 @@ Spawner.runEntity = function(entityTable)
         task.spawn(entityTable.Debug.OnEntityFinishedRebound)
 
         if cycle < totalCycles then
-            task.wait(cyclesConfig.WaitTime or 0)
+            task.wait(tonumber(cyclesConfig.WaitTime) or 0)
         end
     end
 
@@ -936,8 +989,10 @@ end
 
 Plr.CharacterAdded:Connect(onCharacterAdded)
 
-if not getgenv().SpawnerSetup then
-    getgenv().SpawnerSetup = true
+local executorEnv = getgenv and getgenv() or _G
+
+if not executorEnv.SpawnerSetup then
+    executorEnv.SpawnerSetup = true
 
     workspace.DescendantRemoving:Connect(function(des)
         if des.Name == "PathfindNodes" then
