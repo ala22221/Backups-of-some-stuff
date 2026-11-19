@@ -42,7 +42,7 @@ local function safeDestroy(object)
     end
 end
 
--- Misc Functions
+-- Character
 
 local function onCharacterAdded(char)
     Char = char
@@ -50,46 +50,99 @@ local function onCharacterAdded(char)
 end
 
 local function getPlayerRoot()
+    if not Char then
+        return nil
+    end
+
     return Char:FindFirstChild("HumanoidRootPart")
         or Char:FindFirstChild("Head")
 end
 
+-- Asset Loader
+
+local function LoadCustomAsset(asset)
+    if asset == nil then
+        return ""
+    end
+
+    local assetString = tostring(asset)
+
+    if assetString:find("rbxassetid://")
+        or assetString:find("rbxasset://") then
+        return assetString
+    end
+
+    if tonumber(assetString) then
+        return "rbxassetid://" .. assetString
+    end
+
+    if assetString:match("^https?://") then
+        local fileName = "CustomImage_" ..
+            tostring(math.abs(string.byte(assetString, 1) or 1)) .. ".txt"
+
+        local success = pcall(function()
+            if not isfile(fileName) then
+                writefile(fileName, game:HttpGet(assetString))
+            end
+        end)
+
+        if success then
+            local getAsset = getcustomasset or getsynasset
+
+            if getAsset then
+                local ok, result = pcall(getAsset, fileName)
+
+                if ok then
+                    return result
+                end
+            end
+        end
+    end
+
+    return assetString
+end
+
+-- Sound Loader
+
 local function loadSound(soundData)
     local sound = Instance.new("Sound")
     local soundId = tostring(soundData[1])
-    local properties = soundData[2]
+    local properties = soundData[2] or {}
 
     for i, v in next, properties do
         if i ~= "SoundId" and i ~= "Parent" then
-            sound[i] = v
+            pcall(function()
+                sound[i] = v
+            end)
         end
     end
 
     if soundId:find("rbxasset://") then
         sound.SoundId = soundId
     else
-        local numberId = soundId:gsub("%D", "")
-        sound.SoundId = "rbxassetid://" .. numberId
+        sound.SoundId = "rbxassetid://" .. soundId:gsub("%D", "")
     end
 
     sound.Parent = workspace
     return sound
 end
 
+-- Entity Movement
+
 local function dragEntity(entityModel, pos, speed)
     if not entityModel or not entityModel.Parent or not entityModel.PrimaryPart then
         return
     end
 
-    local primaryPart = entityModel.PrimaryPart
-    local distance = (primaryPart.Position - pos).Magnitude
-
     speed = tonumber(speed) or 0
 
     if speed <= 0 then
-        warn("Spawner: Entity speed must be greater than zero!")
+        warn("Spawner: Invalid movement speed:", speed)
         return
     end
+
+    local primaryPart = entityModel.PrimaryPart
+    local distance = (primaryPart.Position - pos).Magnitude
 
     if distance <= 0.001 then
         return
@@ -103,6 +156,150 @@ local function dragEntity(entityModel, pos, speed)
 
     tween:Play()
     tween.Completed:Wait()
+end
+
+-- Room Sorting
+
+local function sortRooms(rooms)
+    table.sort(rooms, function(a, b)
+        local na = tonumber(a.Name)
+        local nb = tonumber(b.Name)
+
+        if na and nb then
+            return na < nb
+        elseif na then
+            return true
+        elseif nb then
+            return false
+        end
+
+        return a.Name < b.Name
+    end)
+
+    return rooms
+end
+
+-- Node Sorting
+
+local function sortNodes(nodeList)
+    table.sort(nodeList, function(a, b)
+        local na = tonumber(a.Name)
+        local nb = tonumber(b.Name)
+
+        if na and nb then
+            return na < nb
+        elseif na then
+            return true
+        elseif nb then
+            return false
+        end
+
+        return a:GetFullName() < b:GetFullName()
+    end)
+
+    return nodeList
+end
+
+-- Collect Nodes From Room
+
+local function collectRoomNodes(room)
+    local roomNodes = {}
+    local added = {}
+
+    local function add(node)
+        if node and node:IsA("BasePart") and not added[node] then
+            added[node] = true
+            roomNodes[#roomNodes + 1] = node
+        end
+    end
+
+    -- Current DOORS
+
+    local pathfindNodes = room:FindFirstChild("PathfindNodes")
+
+    if pathfindNodes then
+        local found = {}
+
+        for _, node in ipairs(pathfindNodes:GetDescendants()) do
+            if node:IsA("BasePart") then
+                found[#found + 1] = node
+            end
+        end
+
+        sortNodes(found)
+
+        for _, node in ipairs(found) do
+            add(node)
+        end
+    end
+
+    -- Hotel - Vision
+
+    if #roomNodes == 0 then
+        local hotelNodes = room:FindFirstChild("Nodes")
+
+        if hotelNodes then
+            add(room:FindFirstChild("RoomStart"))
+
+            local found = {}
+
+            for _, node in ipairs(hotelNodes:GetDescendants()) do
+                if node:IsA("BasePart") and tonumber(node.Name) then
+                    found[#found + 1] = node
+                end
+            end
+
+            sortNodes(found)
+
+            for _, node in ipairs(found) do
+                add(node)
+            end
+
+            add(room:FindFirstChild("RoomEnd"))
+        end
+    end
+
+    -- Fallback
+
+    if #roomNodes == 0 then
+        add(room:FindFirstChild("RoomStart"))
+        add(room:FindFirstChild("RoomEnd"))
+
+        if #roomNodes == 0 then
+            add(room:FindFirstChild("RoomExit"))
+        end
+    end
+
+    return roomNodes
+end
+
+-- Build Route
+
+local function collectRoute(currentRooms)
+    local route = {}
+
+    local rooms = sortRooms(currentRooms:GetChildren())
+
+    for _, room in ipairs(rooms) do
+        local roomNodes = collectRoomNodes(room)
+
+        for _, node in ipairs(roomNodes) do
+            if node.Parent and node:IsDescendantOf(currentRooms) then
+                route[#route + 1] = node
+            end
+        end
+
+        if #roomNodes > 0 then
+            print(
+                "Spawner:",
+                room.Name,
+                "nodes:",
+                #roomNodes
+            )
+        end
+    end
+
+    return route
 end
 
 -- Create Entity
@@ -120,21 +317,21 @@ Spawner.createEntity = function(config)
         if ModelUrl:match("rbxassetid://") then
             local objects = game:GetObjects(ModelUrl)
             return objects and objects[1]
-        else
-            if not isfile(ModelName .. ".txt") then
-                writefile(ModelName .. ".txt", game:HttpGet(ModelUrl))
-            end
-
-            local asset = (getcustomasset or getsynasset)(ModelName .. ".txt")
-            local objects = game:GetObjects(asset)
-            local model = objects and objects[1]
-
-            if model then
-                model.Name = ModelName
-            end
-
-            return model
         end
+
+        if not isfile(ModelName .. ".txt") then
+            writefile(ModelName .. ".txt", game:HttpGet(ModelUrl))
+        end
+
+        local asset = (getcustomasset or getsynasset)(ModelName .. ".txt")
+        local objects = game:GetObjects(asset)
+        local model = objects and objects[1]
+
+        if model then
+            model.Name = ModelName
+        end
+
+        return model
     end
 
     local entityModel = GetGitModel(
@@ -173,7 +370,7 @@ Spawner.createEntity = function(config)
         end
     end
 
-    warn("Spawner: Failed to create entity model or find a PrimaryPart!")
+    warn("Spawner: Failed to create entity model or PrimaryPart!")
     safeDestroy(entityModel)
     return nil
 end
@@ -182,166 +379,65 @@ end
 
 Spawner.runEntity = function(entityTable)
     if not entityTable or not entityTable.Model then
-        warn("Spawner: Entity table or model is nil!")
+        warn("Spawner: Entity or model is nil!")
         return
     end
 
-    local nodes = {}
     local currentRooms = workspace:FindFirstChild("CurrentRooms")
 
     if not currentRooms then
-        warn("Spawner: Workspace.CurrentRooms was not found!")
+        warn("Spawner: CurrentRooms missing!")
         return
     end
 
-    -- Sort rooms numerically
-
-    local rooms = currentRooms:GetChildren()
-
-    table.sort(rooms, function(a, b)
-        local na, nb = tonumber(a.Name), tonumber(b.Name)
-
-        if na and nb then
-            return na < nb
-        elseif na then
-            return true
-        elseif nb then
-            return false
-        end
-
-        return a.Name < b.Name
-    end)
-
-    -- Collect nodes from every room
-
-    for _, room in ipairs(rooms) do
-        local pathfindNodes = room:FindFirstChild("PathfindNodes")
-        local hotelNodes = room:FindFirstChild("Nodes")
-        local roomNodes = {}
-
-        -- Current DOORS nodes
-
-        if pathfindNodes then
-            for _, node in ipairs(pathfindNodes:GetDescendants()) do
-                if node:IsA("BasePart") then
-                    roomNodes[#roomNodes + 1] = node
-                end
-            end
-        end
-
-        -- The Hotel - Vision nodes
-        -- Recursively search nested folders.
-
-        if #roomNodes == 0 and hotelNodes then
-            local roomStart = room:FindFirstChild("RoomStart")
-            local roomEnd = room:FindFirstChild("RoomEnd")
-
-            if roomStart and roomStart:IsA("BasePart") then
-                roomNodes[#roomNodes + 1] = roomStart
-            end
-
-            local numberedNodes = {}
-
-            for _, node in ipairs(hotelNodes:GetDescendants()) do
-                if node:IsA("BasePart") then
-                    numberedNodes[#numberedNodes + 1] = node
-                end
-            end
-
-            -- Sort numbered nodes
-
-            table.sort(numberedNodes, function(a, b)
-                local na = tonumber(a.Name)
-                local nb = tonumber(b.Name)
-
-                if na and nb then
-                    return na < nb
-                elseif na then
-                    return true
-                elseif nb then
-                    return false
-                end
-
-                return a.Name < b.Name
-            end)
-
-            for _, node in ipairs(numberedNodes) do
-                roomNodes[#roomNodes + 1] = node
-            end
-
-            if roomEnd and roomEnd:IsA("BasePart") then
-                roomNodes[#roomNodes + 1] = roomEnd
-            end
-        end
-
-        -- Fallback
-
-        if #roomNodes == 0 then
-            local roomStart = room:FindFirstChild("RoomStart")
-            local roomEnd = room:FindFirstChild("RoomEnd")
-            local roomExit = room:FindFirstChild("RoomExit")
-
-            if roomStart and roomStart:IsA("BasePart") then
-                roomNodes[#roomNodes + 1] = roomStart
-            end
-
-            if roomEnd and roomEnd:IsA("BasePart") then
-                roomNodes[#roomNodes + 1] = roomEnd
-            end
-
-            if #roomNodes == 0 and roomExit and roomExit:IsA("BasePart") then
-                roomNodes[#roomNodes + 1] = roomExit
-            end
-        end
-
-        for _, node in ipairs(roomNodes) do
-            nodes[#nodes + 1] = node
-        end
-    end
+    local nodes = collectRoute(currentRooms)
 
     if #nodes == 0 then
-        warn("Spawner: No valid pathfinding nodes found in CurrentRooms!")
+        warn("Spawner: No movement nodes found!")
         return
     end
 
-    print("Spawner: Collected", #nodes, "movement nodes.")
+    print("Spawner: Initial route contains", #nodes, "nodes.")
 
-    -- Spawn
+    -- Spawn Model
 
     local entityModel = entityTable.Model:Clone()
 
     if not entityModel then
-        warn("Spawner: Failed to clone entity model!")
         return
     end
 
-    if not entityModel.PrimaryPart then
-        entityModel.PrimaryPart = entityModel:FindFirstChildWhichIsA("BasePart", true)
-    end
+    entityModel.PrimaryPart = entityModel.PrimaryPart
+        or entityModel:FindFirstChildWhichIsA("BasePart", true)
 
     if not entityModel.PrimaryPart then
-        warn("Spawner: Spawned entity has no PrimaryPart!")
         safeDestroy(entityModel)
+        warn("Spawner: Entity has no PrimaryPart!")
         return
     end
 
-    local startNodeIndex = entityTable.Config.BackwardsMovement and #nodes or 1
-    local startNodeOffset = entityTable.Config.BackwardsMovement and -50 or 50
-
-    EntityConnections[entityModel] = {}
-    local entityConnections = EntityConnections[entityModel]
+    local backwards = entityTable.Config.BackwardsMovement
+    local startIndex = backwards and #nodes or 1
+    local startOffset = backwards and -50 or 50
 
     entityModel:PivotTo(
-        nodes[startNodeIndex].CFrame
-        * CFrame.new(0, 0, startNodeOffset)
-        + Vector3.new(0, 3.5 + entityTable.Config.HeightOffset, 0)
+        nodes[startIndex].CFrame
+        * CFrame.new(0, 0, startOffset)
+        + Vector3.new(
+            0,
+            3.5 + (entityTable.Config.HeightOffset or 0),
+            0
+        )
     )
 
     entityModel.Parent = workspace
 
+    EntityConnections[entityModel] = {}
+    local entityConnections = EntityConnections[entityModel]
+
     task.spawn(entityTable.Debug.OnEntitySpawned)
 
-    -- Mute entity on spawn
+    -- Mute on death screen
 
     local PlayerGui = Plr:FindFirstChildOfClass("PlayerGui")
     local MainUI = PlayerGui and PlayerGui:FindFirstChild("MainUI")
@@ -365,7 +461,7 @@ Spawner.runEntity = function(entityTable)
         end
     end
 
-    -- Flickering
+    -- Flicker Lights
 
     if entityTable.Config.FlickerLights
         and entityTable.Config.FlickerLights[1] then
@@ -383,9 +479,9 @@ Spawner.runEntity = function(entityTable)
         end
     end
 
-    -- Movement detection
+    task.wait(entityTable.Config.DelayTime or 0)
 
-    task.wait(entityTable.Config.DelayTime)
+    -- Movement Detection
 
     local enteredRooms = {}
 
@@ -415,8 +511,6 @@ Spawner.runEntity = function(entityTable)
             {entityModel, Char}
         ) == nil
 
-        -- Entered room
-
         if floorRay and floorRay.Name == "Floor" then
             for _, room in ipairs(currentRooms:GetChildren()) do
                 if floorRay:IsDescendantOf(room)
@@ -435,14 +529,16 @@ Spawner.runEntity = function(entityTable)
             end
         end
 
-        -- Camera shaking
+        -- Camera Shake
 
         local shakeConfig = entityTable.Config.CamShake
         local shakeMag = (
             playerRoot.Position - entityModel.PrimaryPart.Position
         ).Magnitude
 
-        if shakeConfig[1] and shakeMag <= shakeConfig[3] then
+        if shakeConfig and shakeConfig[1]
+            and shakeMag <= shakeConfig[3] then
+
             local shakeRep = {}
 
             for i, v in next, shakeConfig[2] do
@@ -452,12 +548,13 @@ Spawner.runEntity = function(entityTable)
             shakeRep[1] = shakeConfig[2][1] / shakeConfig[3]
                 * (shakeConfig[3] - shakeMag)
 
-            ModuleScripts.MainGame.camShaker:ShakeOnce(
+            ModuleScripts.MainGame.camShaker.ShakeOnce(
+                ModuleScripts.MainGame.camShaker,
                 table.unpack(shakeRep)
             )
         end
 
-        -- Player in sight
+        -- Player Detection
 
         if playerInSight then
             local _, onScreen = WorldToViewportPoint(
@@ -469,7 +566,7 @@ Spawner.runEntity = function(entityTable)
                 task.spawn(entityTable.Debug.OnLookAtEntity)
             end
 
-            -- Kill player
+            -- Kill Player
 
             if entityTable.Config.CanKill
                 and not Char:GetAttribute("IsDead")
@@ -478,8 +575,6 @@ Spawner.runEntity = function(entityTable)
                     <= entityTable.Config.KillRange then
 
                 task.spawn(function()
-                    -- Prevent death during current Seek sequence
-
                     local floorReplicated = ReSt:FindFirstChild("FloorReplicated")
                     local seekMusic = floorReplicated
                         and floorReplicated:FindFirstChild("SeekMusic")
@@ -540,8 +635,6 @@ Spawner.runEntity = function(entityTable)
                         end
                     end
 
-                    -- Unmute entity after death panel appears
-
                     task.spawn(function()
                         local playerGui = Plr:WaitForChild("PlayerGui")
                         local mainUI = playerGui:WaitForChild("MainUI")
@@ -576,62 +669,110 @@ Spawner.runEntity = function(entityTable)
 
     task.spawn(entityTable.Debug.OnEntityStartMoving)
 
-    -- Cycles
+    -- Route Movement
+    -- Refreshes route when new rooms or nodes load.
 
     local cyclesConfig = entityTable.Config.Cycles
-
-    if entityTable.Config.BackwardsMovement then
-        local inverseNodes = {}
-
-        for nodeIdx = #nodes, 1, -1 do
-            inverseNodes[#inverseNodes + 1] = nodes[nodeIdx]
-        end
-
-        nodes = inverseNodes
-    end
-
     local totalCycles = math.max(
         math.random(cyclesConfig.Min, cyclesConfig.Max),
         1
     )
 
+    local currentIndex = backwards and #nodes or 1
+    local direction = backwards and -1 or 1
+
     for cycle = 1, totalCycles do
-        for nodeIdx = 1, #nodes do
-            if not entityModel.Parent then
-                break
+        local visited = {}
+
+        while entityModel.Parent do
+            -- Refresh route as rooms load.
+
+            local updatedNodes = collectRoute(currentRooms)
+
+            if #updatedNodes == 0 then
+                task.wait(0.2)
+                continue
             end
 
-            dragEntity(
-                entityModel,
-                nodes[nodeIdx].Position
-                    + Vector3.new(0, 3.5 + entityTable.Config.HeightOffset, 0),
-                entityTable.Config.Speed
-            )
+            nodes = updatedNodes
+
+            if currentIndex > #nodes then
+                currentIndex = #nodes
+            end
+
+            if currentIndex < 1 then
+                currentIndex = 1
+            end
+
+            local node = nodes[currentIndex]
+
+            if not node or not node.Parent then
+                task.wait(0.1)
+                continue
+            end
+
+            if not visited[node] then
+                visited[node] = true
+
+                dragEntity(
+                    entityModel,
+                    node.Position + Vector3.new(
+                        0,
+                        3.5 + (entityTable.Config.HeightOffset or 0),
+                        0
+                    ),
+                    entityTable.Config.Speed
+                )
+            end
+
+            currentIndex += direction
+
+            -- End of currently loaded route.
+            -- Wait for the next room to load.
+
+            if currentIndex > #nodes or currentIndex < 1 then
+                break
+            end
         end
 
+        if not entityModel.Parent then
+            break
+        end
+
+        -- Rebound return trip
+
         if cyclesConfig.Max > 1 then
-            for nodeIdx = #nodes, 1, -1 do
+            local returnNodes = collectRoute(currentRooms)
+
+            for i = #returnNodes, 1, -1 do
                 if not entityModel.Parent then
                     break
                 end
 
-                dragEntity(
-                    entityModel,
-                    nodes[nodeIdx].Position
-                        + Vector3.new(0, 3.5 + entityTable.Config.HeightOffset, 0),
-                    entityTable.Config.Speed
-                )
+                local node = returnNodes[i]
+
+                if node and node.Parent then
+                    dragEntity(
+                        entityModel,
+                        node.Position + Vector3.new(
+                            0,
+                            3.5 + (entityTable.Config.HeightOffset or 0),
+                            0
+                        ),
+                        entityTable.Config.Speed
+                    )
+                end
             end
         end
 
         task.spawn(entityTable.Debug.OnEntityFinishedRebound)
 
         if cycle < totalCycles then
-            task.wait(cyclesConfig.WaitTime)
+            task.wait(cyclesConfig.WaitTime or 0)
         end
     end
 
-    -- Destroy
+    -- Cleanup
 
     if entityModel:GetAttribute("NoAI") then
         return
@@ -791,7 +932,7 @@ Spawner.runJumpscare = function(config)
     safeDestroy(sound2)
 end
 
--- Scripts
+-- Setup
 
 Plr.CharacterAdded:Connect(onCharacterAdded)
 
