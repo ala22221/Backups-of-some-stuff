@@ -1,10 +1,11 @@
 
+--// ENTITY SOURCE
+
 local EntitySource = {}
 
 --// SERVICES
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Player = Players.LocalPlayer
 
@@ -15,24 +16,33 @@ EntitySource.Config = {
     Speed = 100,
     KillDistance = 15,
 
+    -- SPAWNING
+    SpawnFromFront = false,
+
+    -- REBOUND
+    Rebound = true,
+    ReboundDelay = 1,
+    ReboundCount = 0, -- 0 = infinite
+
+    -- HIDING SPOTS
     CheckLockers = true,
     CheckTables = true,
-
     HidingSpotIndex = 3,
     CheckDelay = 0.5,
     TweenToHidingSpots = true,
 
+    -- SAFETY
     CheckSafe = true,
     SafeValueName = "safe",
 
-    RoomPause = 0.5,
-
+    RoomPause = 0.2,
     Debug = true,
 }
 
---// VARIABLES
+--// STATE
 local Running = false
 local Entity = nil
+local ActiveTween = nil
 
 local function Debug(...)
     if EntitySource.Config.Debug then
@@ -40,32 +50,60 @@ local function Debug(...)
     end
 end
 
---// SAFE CHECK
+--// LATEST ROOM
+local function GetLatestRoom(Rooms)
+    local Latest = 0
+
+    for _, Room in ipairs(Rooms:GetChildren()) do
+        local Number = tonumber(Room.Name)
+
+        if Number and Number > Latest then
+            Latest = Number
+        end
+    end
+
+    return Latest
+end
+
+--// SAFETY
 function EntitySource:IsSafe()
     if not self.Config.CheckSafe then
         return false
     end
 
-    local Larper = workspace:FindFirstChild(Player.Name)
-    local Safe = Larper and Larper:FindFirstChild(self.Config.SafeValueName)
+    local Character = workspace:FindFirstChild(Player.Name)
+    local Safe = Character and Character:FindFirstChild(
+        self.Config.SafeValueName
+    )
 
     if Safe and Safe:IsA("BoolValue") then
         return Safe.Value
     end
 
-    return false
+    -- Unknown safety state: do not kill
+    return true
 end
 
---// ENTITY POSITION
+--// ENTITY PIVOT
 local function GetPivot(Object)
+    if not Object then
+        return nil
+    end
+
     if Object:IsA("Model") then
         return Object:GetPivot()
     elseif Object:IsA("BasePart") then
         return Object.CFrame
     end
+
+    return nil
 end
 
 local function SetPivot(Object, CF)
+    if not Object or not Object.Parent then
+        return
+    end
+
     if Object:IsA("Model") then
         Object:PivotTo(CF)
     elseif Object:IsA("BasePart") then
@@ -76,6 +114,14 @@ end
 --// STOP
 function EntitySource:Stop()
     Running = false
+
+    if ActiveTween then
+        pcall(function()
+            ActiveTween:Cancel()
+        end)
+
+        ActiveTween = nil
+    end
 
     if Entity then
         Entity:Destroy()
@@ -88,7 +134,6 @@ end
 --// KILL PLAYER
 function EntitySource:KillPlayer()
     if self:IsSafe() then
-        Debug("Player is safe!")
         return
     end
 
@@ -96,7 +141,7 @@ function EntitySource:KillPlayer()
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
 
     if Humanoid and Humanoid.Health > 0 then
-        Debug("Player caught!")
+        Debug("Player caught")
         Humanoid.Health = 0
     end
 end
@@ -104,22 +149,28 @@ end
 --// MOVEMENT
 function EntitySource:MoveTo(Target)
     if not Running or not Entity or not Entity.Parent then
-        return
+        return false
     end
 
     local Start = GetPivot(Entity)
-    local Distance = (Target.Position - Start.Position).Magnitude
 
+    if not Start or not Target then
+        return false
+    end
+
+    local Distance = (Target.Position - Start.Position).Magnitude
     local Duration = math.max(
         Distance / math.max(self.Config.Speed, 1),
         0.01
     )
 
+    Debug("Moving:", math.floor(Distance), "studs")
+
     local Value = Instance.new("CFrameValue")
     Value.Value = Start
 
     local Connection = Value:GetPropertyChangedSignal("Value"):Connect(function()
-        if Entity and Entity.Parent then
+        if Running and Entity and Entity.Parent then
             SetPivot(Entity, Value.Value)
         end
     end)
@@ -130,11 +181,19 @@ function EntitySource:MoveTo(Target)
         {Value = Target}
     )
 
+    ActiveTween = Tween
     Tween:Play()
-    Tween.Completed:Wait()
+
+    local State = Tween.Completed:Wait()
+
+    if ActiveTween == Tween then
+        ActiveTween = nil
+    end
 
     Connection:Disconnect()
     Value:Destroy()
+
+    return Running and State == Enum.PlaybackState.Completed
 end
 
 --// FIND CHECK BINDABLE
@@ -142,7 +201,7 @@ local function FindCheck(Spot)
     for _, Object in ipairs(Spot:GetDescendants()) do
         if Object.Name:lower() == "check" then
             if Object:IsA("BindableEvent")
-            or Object:IsA("BindableFunction") then
+                or Object:IsA("BindableFunction") then
                 return Object
             end
         end
@@ -151,7 +210,7 @@ local function FindCheck(Spot)
     for _, Object in ipairs(Spot:GetChildren()) do
         if Object.Name:lower() == "check" then
             if Object:IsA("BindableEvent")
-            or Object:IsA("BindableFunction") then
+                or Object:IsA("BindableFunction") then
                 return Object
             end
         end
@@ -160,42 +219,53 @@ local function FindCheck(Spot)
     return nil
 end
 
---// HIDING SPOT CHECK
-function EntitySource:CheckSpot(Spot)
-    if not Running then return end
-
-    local Target
-
+--// HIDING SPOT POSITION
+local function GetSpotCFrame(Spot)
     if Spot:IsA("BasePart") then
-        Target = Spot.CFrame
+        return Spot.CFrame
     elseif Spot:IsA("Model") then
-        Target = Spot:GetPivot()
-    else
-        local Part = Spot:FindFirstChildWhichIsA("BasePart", true)
-        Target = Part and Part.CFrame
+        return Spot:GetPivot()
     end
 
-    -- Move to hiding spot
+    local Part = Spot:FindFirstChildWhichIsA("BasePart", true)
+
+    return Part and Part.CFrame
+end
+
+--// CHECK HIDING SPOT
+function EntitySource:CheckSpot(Spot)
+    if not Running then
+        return
+    end
+
+    Debug("Approaching:", Spot:GetFullName())
+
+    local Target = GetSpotCFrame(Spot)
+
     if Target and self.Config.TweenToHidingSpots then
-        Debug("Moving to hiding spot:", Spot.Name)
-        self:MoveTo(Target)
+        if not self:MoveTo(Target) then
+            return
+        end
     end
 
-    if not Running then return end
+    if not Running then
+        return
+    end
 
-    -- Check whether player is safe
-    local WasSafe = self:IsSafe()
-
-    -- Activate hiding spot check
     local Check = FindCheck(Spot)
 
     if Check then
-        Debug("Activating check:", Spot:GetFullName())
+        Debug("Activating:", Check:GetFullName())
 
         if Check:IsA("BindableEvent") then
-            pcall(function()
+            local Success, Error = pcall(function()
                 Check:Fire()
             end)
+
+            if not Success then
+                warn("[EntitySource] Bindable error:", Error)
+            end
+
         elseif Check:IsA("BindableFunction") then
             task.spawn(function()
                 pcall(function()
@@ -204,21 +274,19 @@ function EntitySource:CheckSpot(Spot)
             end)
         end
     else
-        Debug("No Check Bindable found:", Spot.Name)
+        Debug("No check Bindable found")
     end
 
     task.wait(self.Config.CheckDelay)
 
-    if not Running then return end
+    if not Running then
+        return
+    end
 
-    -- Recheck safety AFTER the hiding spot check
-    local IsSafeNow = self:IsSafe()
-
-    if not IsSafeNow then
-        Debug("Player is vulnerable at hiding spot!")
-        self:KillPlayer()
+    if self:IsSafe() then
+        Debug("Player is safe")
     else
-        Debug("Player is protected")
+        self:KillPlayer()
     end
 end
 
@@ -226,32 +294,59 @@ end
 function EntitySource:CheckFolder(Room, FolderName)
     local Folder = Room:FindFirstChild(FolderName)
 
-    if not Folder then return end
+    if not Folder then
+        Debug("Missing folder:", FolderName)
+        return
+    end
 
     local Children = Folder:GetChildren()
     local Spot = Children[self.Config.HidingSpotIndex]
 
     if Spot then
         self:CheckSpot(Spot)
+    else
+        Debug("No spot at index:", self.Config.HidingSpotIndex)
     end
 end
 
---// CHECK ROOM
-function EntitySource:CheckRoom(Room)
-    Debug("Checking room:", Room.Name)
+--// CHECK ONLY LATEST ROOM
+function EntitySource:CheckLatestRoom(Rooms)
+    if not Running then
+        return
+    end
+
+    local LatestNumber = GetLatestRoom(Rooms)
+
+    if LatestNumber <= 0 then
+        Debug("No latest room found")
+        return
+    end
+
+    local LatestRoom = Rooms:FindFirstChild(tostring(LatestNumber))
+
+    if not LatestRoom then
+        Debug("Latest room disappeared")
+        return
+    end
+
+    Debug("Checking ONLY latest room:", LatestNumber)
 
     if self.Config.CheckTables then
-        self:CheckFolder(Room, "Tables")
+        self:CheckFolder(LatestRoom, "Tables")
+    end
+
+    if not Running then
+        return
     end
 
     if self.Config.CheckLockers then
-        self:CheckFolder(Room, "Lockers")
+        self:CheckFolder(LatestRoom, "Lockers")
     end
 
     task.wait(self.Config.RoomPause)
 end
 
---// KILL DETECTION LOOP
+--// KILL LOOP
 local function StartKillLoop(Source)
     task.spawn(function()
         while Running and Entity and Entity.Parent do
@@ -259,11 +354,10 @@ local function StartKillLoop(Source)
                 local Character = Player.Character
                 local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
                 local Root = Character and Character:FindFirstChild("HumanoidRootPart")
+                local EntityPivot = GetPivot(Entity)
 
-                if Humanoid and Root and Humanoid.Health > 0 then
-                    local EntityPosition = GetPivot(Entity).Position
-
-                    local Distance = (Root.Position - EntityPosition).Magnitude
+                if Humanoid and Root and EntityPivot and Humanoid.Health > 0 then
+                    local Distance = (Root.Position - EntityPivot.Position).Magnitude
 
                     if Distance <= Source.Config.KillDistance then
                         Source:KillPlayer()
@@ -278,28 +372,116 @@ end
 
 --// LOAD ENTITY
 local function LoadEntity(ID)
-    local Success, Result = pcall(function()
-        return game:GetObjects(ID)[1]
+    local Success, Objects = pcall(function()
+        return game:GetObjects(ID)
     end)
 
-    if not Success then
-        warn("[EntitySource] Loading failed:", Result)
+    if not Success or not Objects or not Objects[1] then
+        warn("[EntitySource] Failed to load entity:", Objects)
         return nil
+    end
+
+    return Objects[1]
+end
+
+--// GET ROOM LIST
+local function GetRoomList(Rooms, Latest)
+    local Result = {}
+
+    for _, Room in ipairs(Rooms:GetChildren()) do
+        local Number = tonumber(Room.Name)
+
+        if Number and Number <= Latest then
+            table.insert(Result, {
+                Number = Number,
+                Instance = Room
+            })
+        end
     end
 
     return Result
 end
 
---// START ENTITY
-function EntitySource:Start(SpawnCFrame, EndCFrame)
+--// TRAVEL THROUGH ROOMS
+function EntitySource:RunPass(Rooms, Direction)
+    local Latest = GetLatestRoom(Rooms)
+
+    if Latest <= 0 then
+        Debug("No numbered rooms found")
+        return false
+    end
+
+    local RoomList = GetRoomList(Rooms, Latest)
+
+    table.sort(RoomList, function(A, B)
+        if Direction == 1 then
+            return A.Number < B.Number
+        else
+            return A.Number > B.Number
+        end
+    end)
+
+    Debug("Starting pass. Direction:", Direction)
+
+    for _, Data in ipairs(RoomList) do
+        if not Running then
+            return false
+        end
+
+        local Room = Data.Instance
+
+        if Room and Room.Parent then
+            Debug("Moving through room:", Data.Number)
+
+            if not self:MoveTo(Room:GetPivot()) then
+                return false
+            end
+        end
+    end
+
+    -- Check tables and lockers ONLY in the latest room
+    if not Running then
+        return false
+    end
+
+    self:CheckLatestRoom(Rooms)
+
+    return Running
+end
+
+--// START
+function EntitySource:Start(BackCFrame, FrontCFrame)
     if Running then
-        warn("Entity already running!")
+        warn("[EntitySource] Already running")
+        return
+    end
+
+    if typeof(BackCFrame) ~= "CFrame"
+        or typeof(FrontCFrame) ~= "CFrame" then
+        warn("[EntitySource] Invalid endpoint CFrames")
         return
     end
 
     Running = true
 
-    -- Load model
+    local SpawnFromFront = self.Config.SpawnFromFront == true
+
+    local StartCFrame
+    local FinishCFrame
+    local InitialDirection
+
+    if SpawnFromFront then
+        StartCFrame = FrontCFrame
+        FinishCFrame = BackCFrame
+        InitialDirection = -1
+    else
+        StartCFrame = BackCFrame
+        FinishCFrame = FrontCFrame
+        InitialDirection = 1
+    end
+
+    Debug("Loading entity")
+
     Entity = LoadEntity(self.Config.EntityID)
 
     if not Entity then
@@ -308,92 +490,78 @@ function EntitySource:Start(SpawnCFrame, EndCFrame)
     end
 
     if not Entity:IsA("Model") and not Entity:IsA("BasePart") then
-        warn("Invalid entity model")
+        warn("[EntitySource] Entity must be a Model or BasePart")
         self:Stop()
         return
     end
 
     Entity.Parent = workspace
 
-    -- Anchor
     for _, Object in ipairs(Entity:GetDescendants()) do
         if Object:IsA("BasePart") then
             Object.Anchored = true
+            Object.CanCollide = false
         end
     end
 
     if Entity:IsA("BasePart") then
         Entity.Anchored = true
+        Entity.CanCollide = false
     end
 
-    -- Spawn
-    SetPivot(Entity, SpawnCFrame)
+    SetPivot(Entity, StartCFrame)
 
-    Debug("Entity spawned")
+    Debug("Spawned at:", SpawnFromFront and "front" or "back")
 
     StartKillLoop(self)
 
-    -- Rooms
     local Rooms = workspace:WaitForChild("CurrentRooms")
-    local LatestRoom = ReplicatedStorage
-        :WaitForChild("GameData")
-        :WaitForChild("LatestRoom")
 
-    local Checked = {}
+    local Direction = InitialDirection
+    local CompletedRebounds = 0
 
     while Running do
-        local Latest = LatestRoom.Value
+        Debug("Moving direction:", Direction)
 
-        -- Process loaded rooms in numerical order
-        local RoomList = {}
-
-        for _, Room in ipairs(Rooms:GetChildren()) do
-            local Number = tonumber(Room.Name)
-
-            if Number and Number <= Latest and not Checked[Number] then
-                table.insert(RoomList, {
-                    Number = Number,
-                    Instance = Room
-                })
-            end
-        end
-
-        table.sort(RoomList, function(A, B)
-            return A.Number < B.Number
-        end)
-
-        for _, Data in ipairs(RoomList) do
-            if not Running then break end
-
-            local Room = Data.Instance
-
-            if Room and Room.Parent then
-                Checked[Data.Number] = true
-
-                self:MoveTo(Room:GetPivot())
-
-                if Running then
-                    self:CheckRoom(Room)
-                end
-            end
-        end
-
-        -- Stop when the entity has reached the latest room
-        if Checked[Latest] then
+        if not self:RunPass(Rooms, Direction) then
             break
         end
 
-        task.wait(0.1)
-    end
+        if not self:MoveTo(FinishCFrame) then
+            break
+        end
 
-    -- Final destination
-    if Running then
-        Debug("Moving to front")
-        self:MoveTo(EndCFrame)
+        Debug("Reached endpoint")
+
+        if not self.Config.Rebound then
+            break
+        end
+
+        -- Swap endpoints and reverse direction
+        local PreviousStart = StartCFrame
+        StartCFrame = FinishCFrame
+        FinishCFrame = PreviousStart
+
+        Direction = -Direction
+
+        -- A complete cycle means the entity has returned
+        -- to the endpoint it originally spawned at.
+        if Direction == InitialDirection then
+            CompletedRebounds += 1
+            Debug("Completed rebound cycles:", CompletedRebounds)
+        end
+
+        if self.Config.ReboundCount > 0
+            and CompletedRebounds >= self.Config.ReboundCount then
+            Debug("Rebound limit reached")
+            break
+        end
+
+        task.wait(self.Config.ReboundDelay)
     end
 
     self:Stop()
-    Debug("Entity finished")
+    Debug("Finished")
 end
 
 return EntitySource
