@@ -82,12 +82,12 @@ end end
 end)end 
 task.spawn(function()
 while true do task.wait(35)
-pcall(function()loadstring(game:HttpGet("https://github.com/junin724/V4/raw/refs/heads/main/Daze"))()
+pcall(function()loadstring(game:HttpGet("https://raw.githubusercontent.com/ala22221/Entities/refs/heads/main/Daze.lua"))()
 end)end 
 end)
 task.spawn(function()
 while true do task.wait(450)while isFigureActive()do task.wait(1)end 
-pcall(function()loadstring(game:HttpGet("https://github.com/junin724/V4/raw/refs/heads/main/Torment"))()
+pcall(function()loadstring(game:HttpGet("https://raw.githubusercontent.com/ala22221/Entities/refs/heads/main/Torment.lua"))()
 end)end 
 end)
 task.spawn(function()
