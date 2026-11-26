@@ -12,7 +12,7 @@ loadstring(game:HttpGet(
 ))()
 
 --// Assets
-local ROOT = "https://github.com/RegularVynixu/DOORS-Crucifix-Everything/raw/main/Assets/"
+local ROOT = "https://github.com/ala22221/Backups-of-some-stuff/blob/main/Repentance.rbxm?raw=true"
 
 local Assets = {
     Repentance = LoadCustomInstance(ROOT.."Repentance.rbxm")
