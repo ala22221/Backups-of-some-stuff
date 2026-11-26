@@ -8,7 +8,7 @@ local Player = Players.LocalPlayer
 
 --// Utilities
 loadstring(game:HttpGet(
-    ""
+    "https://raw.githubusercontent.com/ala22221/Backups-of-some-stuff/refs/heads/main/Functions.lua"
 ))()
 
 --// Assets
