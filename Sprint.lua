@@ -1,131 +1,163 @@
+-- Garante que o jogo já carregou
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
 
-local Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+local player = Players.LocalPlayer
 
--- Ă¥Â¸Â¸Ă©â€¡Â
-local WHITE = Color3.fromRGB(255, 255, 255)
-local BROWN = Color3.fromRGB(56, 46, 39)
-local BEIGE = Color3.fromRGB(213, 185, 158)
-local TRANSPARENT = 1
+local currentGui = nil
 
--- Ă¥Ë†â€ºĂ¥Â»Âº GUI Ă¥â€¦Æ’Ă§Â´ Ă§Ââ€Ă¥â€¡Â½Ă¦â€¢Â°
-local function createGuiElement(className, properties)
-    local element = Instance.new(className)
-    for property, value in pairs(properties) do
-        element[property] = value
+local function setupSprintGui()
+    -- Remove uma GUI antiga caso já exista para evitar duplicatas
+    if CoreGui:FindFirstChild("DoorsBottomSprintGui") then
+        CoreGui.DoorsBottomSprintGui:Destroy()
     end
-    return element
+
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+
+    -- Criando a ScreenGui principal
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "DoorsBottomSprintGui"
+    screenGui.IgnoreGuiInset = true
+    pcall(function()
+        screenGui.Parent = CoreGui
+    end)
+    if not screenGui.Parent then
+        screenGui.Parent = player:WaitForChild("PlayerGui")
+    end
+    currentGui = screenGui
+
+    -- 1. BOTÃO DE SPRINT COM O QUADRADO BRANCO NO CANTO INFERIOR DIREITO
+    local sprintButton = Instance.new("TextButton")
+    sprintButton.Name = "SprintSquareButton"
+    sprintButton.Size = UDim2.new(0, 95, 0, 70) 
+    sprintButton.Position = UDim2.new(1, -115, 1, -85) 
+    sprintButton.BackgroundColor3 = Color3.fromRGB(115, 115, 115) 
+    sprintButton.BorderSizePixel = 0
+    sprintButton.Text = ""
+    sprintButton.Parent = screenGui
+
+    -- O quadrado branco estilizado dentro do botão
+    local cutSquare = Instance.new("Frame")
+    cutSquare.Name = "CutSquareDesign"
+    cutSquare.Size = UDim2.new(0, 40, 0, 40)
+    cutSquare.AnchorPoint = Vector2.new(0.5, 0.5)
+    cutSquare.Position = UDim2.new(0.5, 0, 0.5, 0)
+    cutSquare.BackgroundTransparency = 1
+    cutSquare.Parent = sprintButton
+
+    local cutStroke = Instance.new("UIStroke")
+    cutStroke.Color = Color3.fromRGB(255, 255, 255)
+    cutStroke.Thickness = 3
+    cutStroke.Parent = cutSquare
+
+    -- 2. BARRA DE SPRINT HORIZONTAL ABAIXO DOS ITENS (Com contorno preto e grossura 4)
+    local bottomSprintBarOuter = Instance.new("Frame")
+    bottomSprintBarOuter.Name = "BottomSprintOuter"
+    bottomSprintBarOuter.Size = UDim2.new(0, 210, 0, 6) 
+    bottomSprintBarOuter.AnchorPoint = Vector2.new(0.5, 1)
+    bottomSprintBarOuter.Position = UDim2.new(0.5, 0, 1, -8) 
+    bottomSprintBarOuter.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bottomSprintBarOuter.BorderSizePixel = 0
+    bottomSprintBarOuter.Parent = screenGui
+
+    -- Adicionando o UIStroke com grossura 4 e cor preta
+    local barStroke = Instance.new("UIStroke")
+    barStroke.Color = Color3.fromRGB(0, 0, 0) -- Preto
+    barStroke.Thickness = 4 -- Grossura 4
+    barStroke.Parent = bottomSprintBarOuter
+
+    local bottomSprintFill = Instance.new("Frame")
+    bottomSprintFill.Name = "BottomFill"
+    bottomSprintFill.Size = UDim2.new(1, 0, 1, 0)
+    bottomSprintFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255) 
+    bottomSprintFill.BorderSizePixel = 0
+    bottomSprintFill.Parent = bottomSprintBarOuter
+
+    -- 3. LÓGICA DO SPRINT, GASTO E RECARGA TOTAL
+    local maxStamina = 100
+    local currentStamina = 100
+    local drainRate = 45   
+    local regenRate = 25   
+    local normalSpeed = 16
+    local sprintSpeed = 23 
+
+    local isSprinting = false
+    local exhausted = false
+
+    local function updateVisual()
+        local scale = math.clamp(currentStamina / maxStamina, 0, 1)
+        bottomSprintFill.Size = UDim2.new(scale, 0, 1, 0) 
+    end
+
+    sprintButton.MouseButton1Down:Connect(function()
+        if exhausted then return end
+        
+        isSprinting = not isSprinting
+        
+        if isSprinting then
+            sprintButton.BackgroundColor3 = Color3.fromRGB(170, 170, 170) 
+        else
+            sprintButton.BackgroundColor3 = Color3.fromRGB(115, 115, 115)
+            if humanoid and humanoid.Parent then
+                humanoid.WalkSpeed = normalSpeed
+            end
+        end
+    end)
+
+    -- Detecta se o player morreu para destruir a GUI imediatamente
+    humanoid.Died:Connect(function()
+        if screenGui then
+            screenGui:Destroy()
+        end
+    end)
+
+    -- Loop de funcionamento em tempo real
+    local connection
+    connection = RunService.RenderStepped:Connect(function(dt)
+        if not character or not character.Parent or not humanoid or humanoid.Health <= 0 then
+            if screenGui then
+                screenGui:Destroy()
+            end
+            connection:Disconnect()
+            return
+        end
+
+        if isSprinting and not exhausted then
+            if humanoid.MoveDirection.Magnitude > 0 then
+                currentStamina = currentStamina - (drainRate * dt)
+                humanoid.WalkSpeed = sprintSpeed
+                
+                if currentStamina <= 0 then
+                    currentStamina = 0
+                    exhausted = true
+                    isSprinting = false
+                    sprintButton.BackgroundColor3 = Color3.fromRGB(115, 115, 115)
+                    humanoid.WalkSpeed = normalSpeed
+                end
+            else
+                humanoid.WalkSpeed = normalSpeed
+            end
+        else
+            if currentStamina < maxStamina then
+                currentStamina = currentStamina + (regenRate * dt)
+                if currentStamina >= maxStamina then
+                    currentStamina = maxStamina
+                    exhausted = false 
+                end
+            end
+        end
+
+        updateVisual()
+    end)
 end
 
--- Ă¥Ë†â€ºĂ¥Â»Âº GUI Ă¥â€¦Æ’Ă§Â´ 
-local StaminaGui = createGuiElement("ScreenGui", {Name = "StaminaGui", Parent = Parent, Enabled = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling})
-local Sprint = createGuiElement("Frame", {Name = "Sprint", Parent = StaminaGui, AnchorPoint = Vector2.new(0, 1), BackgroundColor3 = WHITE, BackgroundTransparency = TRANSPARENT, Position = UDim2.new(0.93, 0, 0.5, 0), Size = UDim2.new(0.056, 0, 0.076, 0), SizeConstraint = Enum.SizeConstraint.RelativeYY, ZIndex = 1005})
-local ImageLabel = createGuiElement("ImageLabel", {Parent = Sprint, BackgroundColor3 = BEIGE, Size = UDim2.new(1, 0, 1, 0), SizeConstraint = Enum.SizeConstraint.RelativeYY, Visible = false})
-local Bar = createGuiElement("Frame", {Name = "Bar", Parent = Sprint, AnchorPoint = Vector2.new(0, 0.5), BackgroundColor3 = BROWN, BackgroundTransparency = 0.7, Position = UDim2.new(-2.726, 0, 0.5, 0), Size = UDim2.new(5, 0, 0.3, 0), ZIndex = 0})
-local Fill = createGuiElement("Frame", {Name = "Fill", Parent = Bar, AnchorPoint = Vector2.new(0, 0.5), BackgroundColor3 = BEIGE, Position = UDim2.new(0, 0, 0.5, 0), Size = UDim2.new(1, 0, 1, 0), ZIndex = 2})
+-- Inicializa no carregamento atual
+setupSprintGui()
 
--- Ă¦Â·Â»Ă¥Â Ă¥Â¥â€Ă¨Â·â€˜Ă¦Å’â€°Ă©â€™Â®
-local RunButton = createGuiElement("TextButton", {
-    Parent = StaminaGui,
-    Text = "Sprint",
-    Size = UDim2.new(0.1, 0, 0.1, 0),
-    Position = UDim2.new(0.9, 0, 0.5, 0), -- Ă¦â€Â¾Ă¥Å“Â¨Ă¥Â±ÂĂ¥Â¹â€¢Ă¥ÂÂ³Ă¨Â¾Â¹
-    BackgroundColor3 = BEIGE,
-    TextColor3 = BROWN,
-    Font = Enum.Font.SourceSans,
-    TextScaled = true
-})
-local RunButtonCorner = createGuiElement("UICorner", {CornerRadius = UDim.new(0.25, 0), Parent = RunButton})
-
--- Ă¥ÂËœĂ©â€¡Â
-local Plr = Players.LocalPlayer
-local Char = Plr.Character or Plr.CharacterAdded:Wait()
-local Hum = Char:WaitForChild("Humanoid")
-
-local stamina, staminaMax = 100, 100
-local cooldown = false
-local isSprinting = false
-
-local ModuleScripts = {
-    MainGame = require(Plr.PlayerGui.MainUI.Initiator.Main_Game),
-}
-
--- Hook metamethod
-local nIdx; nIdx = hookmetamethod(game, "__newindex", newcclosure(function(t, k, v)
-    if k == "WalkSpeed" then
-        if ModuleScripts.MainGame.chase then
-            v = ModuleScripts.MainGame.crouching and 15 or 22
-        elseif ModuleScripts.MainGame.crouching then
-            v = 8
-        else
-            v = isSprinting and 22 or 12
-        end
-    end
-    return nIdx(t, k, v)
-end))
-
-local zerostamtween = TweenService:Create(ImageLabel, TweenInfo.new(12), {ImageTransparency = 0})
-
-local function toggleSprint()
-    if cooldown then return end -- Ă¥Â¦â€Ă¦ÂÅ“Ă¥Å“Â¨Ă¥â€ Â·Ă¥ÂÂ´Ă§ÂÂ¶Ă¦â‚¬ÂĂ¯Â¼Å’Ă§â€ºÂ´Ă¦ÂÂ¥Ă¨Â¿â€Ă¥â€ºÂ
-
-    if isSprinting then
-        -- Ă¥ÂÅ“Ă¦Â­Â¢Ă¥Â¥â€Ă¨Â·â€˜
-        isSprinting = false
-        Hum:SetAttribute("SpeedBoost", 0)
-        Hum.WalkSpeed = 12
-        TweenService:Create(ImageLabel, TweenInfo.new(1), {ImageTransparency = 1}):Play()
-    else
-        -- Ă¥Â¼â‚¬Ă¥Â§â€¹Ă¥Â¥â€Ă¨Â·â€˜
-        isSprinting = true
-        Hum:SetAttribute("SpeedBoost", 4)
-        zerostamtween:Play()
-        while isSprinting and stamina > 0 do
-            Hum.WalkSpeed = 22
-            stamina = math.max(stamina - 1, 0)
-            Fill.Size = UDim2.new(1 * stamina / staminaMax, 1, 1, 0)
-            task.wait(0.1)
-        end
-        zerostamtween:Pause()
-        isSprinting = false
-        Hum:SetAttribute("SpeedBoost", 0)
-        Hum.WalkSpeed = 12
-        TweenService:Create(ImageLabel, TweenInfo.new(1), {ImageTransparency = 1}):Play()
-
-        if stamina == 0 then
-            -- Ă¥â€ Â·Ă¥ÂÂ´
-            ModuleScripts.MainGame.caption("You are tired...", true)
-            local noStaminaSound = Instance.new("Sound", workspace)
-            noStaminaSound.SoundId = "rbxassetid://8258601891"
-            noStaminaSound.Volume = 0.8
-            noStaminaSound.PlayOnRemove = true
-            noStaminaSound:Destroy()
-            cooldown = true
-            TweenService:Create(ImageLabel, TweenInfo.new(0.3), {ImageTransparency = 0}):Play()
-            wait(0.3)
-            TweenService:Create(ImageLabel, TweenInfo.new(10), {ImageTransparency = 1}):Play()
-            for i = 1, staminaMax, 1 do
-                stamina = i
-                Fill.Size = UDim2.new(1 * stamina / staminaMax, 1, 1, 0)
-                task.wait(0.14)
-            end
-            cooldown = false
-        else
-            -- Ă¨Â¡Â¥Ă¥â€¦â€¦
-            cooldown = false
-            TweenService:Create(ImageLabel, TweenInfo.new(1), {ImageTransparency = 1}):Play()
-            while not isSprinting do
-                stamina = math.min(stamina + 1, staminaMax)
-                Fill.Size = UDim2.new(1 * stamina / staminaMax, 1, 1, 0)
-                task.wait(0.14)
-            end
-        end        
-    end
-end
-
--- Ă§Â»â€˜Ă¥Â®ÂĂ¦Å’â€°Ă©â€™Â®Ă§â€Â¹Ă¥â€¡Â»Ă¤Âºâ€¹Ă¤Â»Â¶
-RunButton.MouseButton1Click:Connect(toggleSprint)
-
-Hum:SetAttribute("SpeedBoost", 0)
-Hum.WalkSpeed = 12
+-- Recria a GUI automaticamente quando o player renascer (respawn)
+player.CharacterAdded:Connect(function(newChar)
+    task.wait(0.5) -- Pequeno delay para garantir que o character carregou o humanoid
+    setupSprintGui()
+end)
